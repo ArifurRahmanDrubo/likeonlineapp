@@ -1,0 +1,489 @@
+<?php
+
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\Route;
+use App\Http\Controllers\PppoeProfile;
+use App\Http\Controllers\BoxController;
+use App\Http\Controllers\SmsController;
+use App\Http\Controllers\AuthController;
+use App\Http\Controllers\SaleController;
+use App\Http\Controllers\ZoneController;
+use App\Http\Controllers\HelloController;
+use App\Http\Controllers\ReportController;
+use App\Http\Controllers\TariffController;
+use App\Http\Controllers\UpzilaController;
+use App\Http\Controllers\InvoiceController;
+use App\Http\Controllers\PackageController;
+
+use App\Http\Controllers\PayheadController;
+use App\Http\Controllers\PayrollController;
+use App\Http\Controllers\ProductController;
+use App\Http\Controllers\SubZoneController;
+use App\Http\Controllers\AccountsController;
+use App\Http\Controllers\CategoryController;
+use App\Http\Controllers\CustomerController;
+use App\Http\Controllers\DistrictController;
+use App\Http\Controllers\EmployeeController;
+use App\Http\Controllers\MikroTikController;
+use App\Http\Controllers\PositionController;
+use App\Http\Controllers\PurchaseController;
+use App\Http\Controllers\SupplierController;
+use App\Http\Controllers\DashboardController;
+use App\Http\Controllers\ClientTypeController;
+use App\Http\Controllers\DepartmentController;
+use App\Http\Controllers\EmailSetupController;
+use App\Http\Controllers\NewRequestController;
+use App\Http\Controllers\ResignruleController;
+use App\Http\Controllers\MackpackageController;
+use App\Http\Controllers\MacResellerController;
+use App\Http\Controllers\ResellerBoxController;
+use App\Http\Controllers\SystemSetupController;
+use App\Http\Controllers\UserProfileController;
+use App\Http\Controllers\WebCustomerController;
+use App\Http\Controllers\EquipmentUseController;
+use App\Http\Controllers\InvoiceSetupController;
+use App\Http\Controllers\ProtocolTypeController;
+use App\Http\Controllers\ResellerZoneController;
+use App\Http\Controllers\BandwidthbillController;
+use App\Http\Controllers\CompanyProfileController;
+use App\Http\Controllers\ConnectionTypeController;
+use App\Http\Controllers\MikrotikServerController;
+use App\Http\Controllers\ResellerUpzilaController;
+use App\Http\Controllers\DailyCollectionController;
+use App\Http\Controllers\ResellerSubzoneController;
+use App\Http\Controllers\ResellerDistrictController;
+use App\Http\Controllers\ResellerPositionController;
+use App\Http\Controllers\RoleAndPermissionController;
+use App\Http\Controllers\ResellerDepartmentController;
+use App\Http\Controllers\CustomerBillingStatusController;
+
+/*
+|--------------------------------------------------------------------------
+| API Routes
+|--------------------------------------------------------------------------
+|
+| Here is where you can register API routes for your application. These
+| routes are loaded by the RouteServiceProvider and all of them will
+| be assigned to the "api" middleware group. Make something great!
+|
+*/
+//web
+Route::post('/contact', [WebCustomerController::class, 'storeContact']);
+
+Route::get('/get-webpackage', [WebCustomerController::class, 'webpackage']);
+Route::post('/customer-new-line', [WebCustomerController::class, 'storeCustomerNewLine']);
+
+
+
+Route::post('/register', [AuthController::class, 'register']);
+Route::post('/login', [HelloController::class, 'login']);
+Route::post('/send-otp', [AuthController::class, 'SendOTPCode']);
+Route::post('/verify-otp', [AuthController::class, 'VerifyOTP']);
+Route::post('/reset-password', [AuthController::class, 'ResetPassword'])->middleware('auth:sanctum');
+Route::put('/updatepassword', [AuthController::class, 'UpdatePassword'])->middleware('auth:sanctum');
+Route::post('/user-profile', [UserProfileController::class, 'UserProfile'])->middleware('auth:sanctum');
+Route::get('/user-profile', [UserProfileController::class, 'getUserProfile'])->middleware('auth:sanctum');
+Route::delete('/user-delete', [UserProfileController::class, 'Userdelete'])->middleware('auth:sanctum');
+Route::post('/logout', [AuthController::class, 'logout'])->middleware('auth:sanctum')->name('logout');
+Route::post('/logoutOtherUser', [AuthController::class, 'logoutOtherUser'])->middleware('auth:sanctum')->name('logoutOtherUser');
+Route::get('/user', [AuthController::class, 'user'])->middleware('auth:sanctum');
+Route::middleware('auth:sanctum')->get('/user-permissions', [RoleAndPermissionController::class, 'getUserPermissions']);
+Route::middleware(['auth:sanctum'])->group(function () {
+    //configuration
+    Route::get('get-zones', [ZoneController::class, 'index'])->middleware('permission:zone,read');
+    Route::post('create-zones', [ZoneController::class, 'store'])->middleware('permission:zone,write');
+    Route::post('update-zones', [ZoneController::class, 'update'])->middleware('permission:zone,write');
+    Route::post('delete-zones', [ZoneController::class, 'destroy'])->middleware('permission:zone,full');
+    Route::post('subzones/delete-multiple', [ZoneController::class, 'deleteMultiple'])->middleware('permission:subzone,full');
+    //subzone
+    Route::get('get-subzones', [SubZoneController::class, 'index'])->middleware('permission:subzone,read');
+    Route::post('create-subzones', [SubZoneController::class, 'store'])->middleware('permission:subzone,write');
+    Route::post('update-subzones', [SubZoneController::class, 'update'])->middleware('permission:subzone,write');
+    Route::post('delete-subzones', [SubZoneController::class, 'destroy'])->middleware('permission:subzone,full');
+    Route::get('subzone-by-zone-id', [SubZoneController::class, 'Subzonebyzone'])->middleware('permission:subzone,write');
+    Route::post('subzones/delete-multiple', [SubZoneController::class, 'deleteMultiple'])->middleware('permission:subzone,full');
+    //box
+    Route::get('get-boxes', [BoxController::class, 'index'])->middleware('permission:box,read');
+    Route::post('create-boxes', [BoxController::class, 'store'])->middleware('permission:box,write');
+    Route::post('update-boxes', [BoxController::class, 'update'])->middleware('permission:box,write');
+    Route::post('delete-boxes', [BoxController::class, 'destroy'])->middleware('permission:box,full');
+    Route::post('boxes/delete-multiple', [BoxController::class, 'deleteMultiple'])->middleware('permission:box,full');
+    //connectiontype
+    Route::get('get-connection-type', [ConnectionTypeController::class, 'index'])->middleware('permission:connection_type,read');
+    Route::post('create-connection-type', [ConnectionTypeController::class, 'store'])->middleware('permission:connection_type,write');
+    Route::post('update-connection-type', [ConnectionTypeController::class, 'update'])->middleware('permission:connection_type,write');
+    Route::post('delete-connection-type', [ConnectionTypeController::class, 'destroy'])->middleware('permission:connection_type,full');
+    Route::post('connection-type/delete-multiple', [ConnectionTypeController::class, 'deleteMultiple'])->middleware('permission:connection_type,full');
+    //clienttype
+    Route::get('get-client-type', [ClientTypeController::class, 'index'])->middleware('permission:client_type,read');
+
+    Route::post('delete-client-type', [ClientTypeController::class, 'destroy'])->middleware('permission:client_type,full');
+    Route::post('client-types/delete-multiple', [ClientTypeController::class, 'deleteMultiple'])->middleware('permission:client_type,full');
+    //
+    Route::post('update-client-types', [ClientTypeController::class, 'update'])->middleware('permission:client_type,full');
+    Route::post('create-client-types', [ClientTypeController::class, 'store'])->middleware('permission:client_type,write');
+
+
+    //protocoltype
+    Route::get('get-protocol-type', [ProtocolTypeController::class, 'index'])->middleware('permission:protocol_type,read');
+    Route::post('create-protocol-type', [ProtocolTypeController::class, 'store'])->middleware('permission:protocol_type,write');
+    Route::post('update-protocol-type', [ProtocolTypeController::class, 'update'])->middleware('permission:protocol_type,write');
+    Route::post('delete-protocol-type', [ProtocolTypeController::class, 'destroy'])->middleware('permission:protocol_type,full');
+    Route::post('protocol-type/delete-multiple', [ProtocolTypeController::class, 'deleteMultiple'])->middleware('permission:protocol_type,full');
+    //billingstatus
+    Route::get('get-customer-billingstatus', [CustomerBillingStatusController::class, 'index'])->middleware('permission:billing_status,read');
+
+    Route::post('delete-customer-billingstatus', [CustomerBillingStatusController::class, 'destroy'])->middleware('permission:billing_status,full');
+    Route::post('update-billing-status', [CustomerBillingStatusController::class, 'update'])->middleware('permission:billing_status,write');
+    Route::post('create-billing-status', [CustomerBillingStatusController::class, 'store'])->middleware('permission:billing_status,write');
+    Route::post('customer-billingstatus/delete-multiple', [CustomerBillingStatusController::class, 'deleteMultiple'])->middleware('permission:billing_status,full');
+
+    ///district
+    Route::get('get-district', [DistrictController::class, 'index'])->middleware('permission:district,read');
+    Route::post('create-district', [DistrictController::class, 'store'])->middleware('permission:district,write');
+    Route::post('update-district', [DistrictController::class, 'update'])->middleware('permission:district,write');
+    Route::post('delete-district', [DistrictController::class, 'destroy'])->middleware('permission:district,full');
+
+    Route::post('district/delete-multiple', [DistrictController::class, 'deleteMultiple'])->middleware('permission:district,full');
+    //upzila
+    Route::get('get-upzila', [UpzilaController::class, 'index'])->middleware('permission:upzila,read');
+
+    Route::post('delete-upzila', [UpzilaController::class, 'destroy'])->middleware('permission:upzila,full');
+    Route::post('update-upzila', [UpzilaController::class, 'update'])->middleware('permission:upzila,write');
+    Route::post('create-upzila', [UpzilaController::class, 'store'])->middleware('permission:upzila,write');
+    Route::post('upzila/delete-multiple', [UpzilaController::class, 'deleteMultiple'])->middleware('permission:upzila,full');
+    //package
+    Route::get('get-package', [PackageController::class, 'index'])->middleware('permission:package,read');
+
+    Route::post('delete-package', [PackageController::class, 'destroy'])->middleware('permission:package,full');
+    Route::post('update-package', [PackageController::class, 'update'])->middleware('permission:package,write');
+    Route::post('create-package', [PackageController::class, 'store'])->middleware('permission:package,write');
+    Route::post('package/delete-multiple', [PackageController::class, 'deleteMultiple'])->middleware('permission:package,full');
+
+
+    //HR &PAYROLL SECTION
+    Route::get('get-department', [DepartmentController::class, 'index'])->middleware('permission:department,read');
+
+    Route::post('delete-department', [DepartmentController::class, 'destroy'])->middleware('permission:department,full');
+    Route::post('update-department', [DepartmentController::class, 'update'])->middleware('permission:department,write');
+    Route::post('create-department', [DepartmentController::class, 'store'])->middleware('permission:department,write');
+    Route::post('department/delete-multiple', [DepartmentController::class, 'deleteMultiple'])->middleware('permission:department,full');
+
+    //resignrule
+    Route::get('get-resignrule', [ResignruleController::class, 'index'])->middleware('permission:resign_rule,read');
+    Route::post('update-resignrule', [ResignruleController::class, 'update'])->middleware('permission:resign_rule,write');
+    Route::post('create-resignrule', [ResignruleController::class, 'store'])->middleware('permission:resign_rule,write');
+    Route::post('delete-resignrule', [ResignruleController::class, 'destroy'])->middleware('permission:resign_rule,full');
+    Route::post('resignrule/delete-multiple', [ResignruleController::class, 'deleteMultiple'])->middleware('permission:resign_rule,full');
+
+    //position
+    Route::get('get-position', [PositionController::class, 'index'])->middleware('permission:position,read');
+    Route::post('create-position', [PositionController::class, 'store'])->middleware('permission:position,write');
+    Route::post('update-position', [PositionController::class, 'update'])->middleware('permission:position,write');
+    Route::post('delete-position', [PositionController::class, 'destroy'])->middleware('permission:position,full');
+    Route::post('positions/delete-multiple', [PositionController::class, 'deleteMultiple'])->middleware('permission:position,full');
+
+    //MacResseler
+    Route::get('get-mackpackage', [MackpackageController::class, 'index'])->middleware('permission:macpackage,read');
+    Route::post('update-mackpackage', [MackpackageController::class, 'update'])->middleware('permission:macpackage,write');
+    Route::post('create-mackpackage', [MackpackageController::class, 'store'])->middleware('permission:macpackage,write');
+    Route::post('delete-mackpackage', [MackpackageController::class, 'destroy'])->middleware('permission:macpackage,full');
+    Route::post('mackpackage/delete-multiple', [MackpackageController::class, 'deleteMultiple'])->middleware('permission:macpackage,full');
+    Route::post('tariffs', [TariffController::class, 'store'])->middleware('permission:tariff,write');
+    Route::get('tariffs', [TariffController::class, 'index'])->middleware('permission:tariff,read');
+    Route::post('getTariffByid', [TariffController::class, 'getTariffByid'])->middleware('permission:tariff,write');
+    Route::post('updatetariffs', [TariffController::class, 'updatetariffs'])->middleware('permission:tariff,write');
+    Route::post('deletetariff', [TariffController::class, 'deleteTariff'])->middleware('permission:tariff,full');
+    //MikrotikServer
+    Route::get('hello', [HelloController::class, 'hello']);
+    Route::post('user-status', [HelloController::class, 'UserStatus']);
+    Route::get('get-mikrotikserver', [MikroTikController::class, 'index'])->middleware('permission:mikrotik_server,read');
+
+    Route::post('update-mikrotikserver', [MikroTikController::class, 'update'])->middleware('permission:mikrotik_server,write');
+    Route::post('delete-mikrotikserver', [MikroTikController::class, 'destroy'])->middleware('permission:mikrotik_server,full');
+    Route::post('create-mikrotikserver', [MikroTikController::class, 'store'])->middleware('permission:mikrotik_server,write');
+
+    Route::post('getusers-mikrotikserver', [MikroTikController::class, 'getUsers']);
+    //pppoeProfile
+    Route::get('get-PPPOEProfile', [PppoeProfile::class, 'getpppoeProfile']);
+    Route::get('get-PPPOEIPpool', [PppoeProfile::class, 'getpppoeIPpool']);
+    Route::post('create-PPPOEProfile', [PppoeProfile::class, 'createpppoeProfile']);
+    Route::post('create-PPPOEIPpool', [PppoeProfile::class, 'createpppoeIppool']);
+    Route::get('getProfile-mikrotikserver', [MikroTikController::class, 'getPppoeProfiles']);
+    Route::post('mikrotikserver/delete-multiple', [MikroTikController::class, 'deleteMultiple'])->middleware('permission:mikrotik_server,full');
+    Route::get('get-MacReseller', [MacResellerController::class, 'index'])->middleware('permission:macreseller,read');
+    Route::post('create-MacReseller', [MacResellerController::class, 'store'])->middleware('permission:macreseller,rwrite');
+    Route::post('update-MacReseller', [MacResellerController::class, 'updateMacReseller'])->middleware('permission:macreseller,write');
+    Route::post('delete-MacReseller', [MacResellerController::class, 'destroy'])->middleware('permission:macreseller,rfull');
+    Route::post('updateResellerType', [MacResellerController::class, 'updateResellerType'])->middleware('permission:macreseller,write');
+    Route::get('getMacResellerbyId', [MacResellerController::class, 'getMacResellerbyId'])->middleware('permission:macreseller,write');
+    Route::get('getMacResellerAllDatabyId', [MacResellerController::class, 'getMacResellerAllDatabyId']);
+
+
+
+    //connectionMikrotikROUTER and ROUTER
+    Route::get('/mikrotik/users', [MikroTikController::class, 'getUsers']);
+    Route::post('/mikrotik/user/add', [MikroTikController::class, 'addUser']);
+
+
+    // Newrequest
+    Route::post('delete-newrequest', [NewRequestController::class, 'destroy']);
+    Route::post('create-newrequest', [NewRequestController::class, 'store']);
+    Route::post('assign_to', [NewRequestController::class, 'assignto']);
+    Route::post('complete-newrequest', [NewRequestController::class, 'completed']);
+    Route::get('newrequest', [NewRequestController::class, 'index']);
+    Route::post('getNewRequestQuery', [NewRequestController::class, 'queryData']);
+
+    Route::post('newrequest/delete-multiple', [NewRequestController::class, 'deleteMultiple']);
+
+    //New Customer
+    Route::post('create-customer', [CustomerController::class, 'store']);
+    Route::post('delete-customer', [HelloController::class, 'DeleteClient']);
+    Route::get('billingLists', [CustomerController::class, 'index']);
+    Route::get('clientProfileData', [CustomerController::class, 'clientData']);
+    Route::get('clientList', [HelloController::class, 'clientList']);
+    Route::get('clientlistdashboard', [CustomerController::class, 'clientlistdashboard']);
+    Route::get('billinglistdashboard', [CustomerController::class, 'billinglistdashboard']);
+
+    Route::get('getcustomerData', [CustomerController::class, 'index']);
+    Route::post('update-clientbillingstatus', [CustomerController::class, 'updateclientbillingstatus']);
+    Route::post('update-packageStatus', [CustomerController::class, 'updatepPackageStatus']);
+    Route::get('get-pdfImages', [CustomerController::class, 'getpdfImages']);
+
+    Route::post('updatebulkstatus', [CustomerController::class, 'updatebulkStatus'])->middleware('permission:bulk_status_change,write');
+    Route::post('disabledSelectedClient', [CustomerController::class, 'disabledSelectedClient']);
+    Route::post('enabledSelectedClient', [CustomerController::class, 'enabledSelectedClient']);
+    Route::post('toggleClient', [CustomerController::class, 'toggleClient']);
+    Route::post('updatebulkstatus', [CustomerController::class, 'updatebulkStatus']);
+    Route::post('bindMac', [CustomerController::class, 'bindMac']);
+    Route::post('unbindMac', [CustomerController::class, 'unbindMac']);
+    Route::post('bindSelectedMacAddresses', [CustomerController::class, 'bindSelectedMacAddresses']);
+    Route::post('unbindSelectedMacAddresses', [CustomerController::class, 'unbindSelectedMacAddresses']);
+    Route::post('unbindMac', [CustomerController::class, 'unbindMac']);
+    //daily Bill Collectiond
+    Route::get('dailycollectiondashboard', [DailyCollectionController::class, 'dailycollectiondashboard']);
+    Route::get('getDailyBillCollection', [DailyCollectionController::class, 'getDailyBillCollection']);
+    Route::get('getDailyBillCollectionQuery', [DailyCollectionController::class, 'getDailyBillCollectionQuery']);
+
+
+    //Report
+    Route::get('getBillCollection', [ReportController::class, 'getBillCollection']);
+    Route::get('getBillCollectionQuery', [ReportController::class, 'getBillCollectionQuery']);
+    Route::get('getDiscountReport', [ReportController::class, 'getDiscountReport']);
+    Route::get('getDiscountReportQuery', [ReportController::class, 'getDiscountReportQuery']);
+    Route::get('getCustomerReport', [ReportController::class, 'getCustomerReport']);
+    Route::post('getCustomerReportQuery', [ReportController::class, 'getCustomerReportQuery']);
+    //employee
+    Route::post('create-employee', [EmployeeController::class, 'store']);
+    Route::post('delete-employee', [HelloController::class, 'DeleteEmployee']);
+    Route::post('remove-mikrotikuser', [CustomerController::class, 'removeMikrotikUser']);
+
+    Route::get('getemployee', [EmployeeController::class, 'index']);
+    Route::post('create-attendence', [EmployeeController::class, 'attendence']);
+    Route::post('update-attendance', [EmployeeController::class, 'updateAttendence']);
+    Route::get('get-attendance', [EmployeeController::class, 'getAttendance']);
+    Route::post('create-allowance', [EmployeeController::class, 'allowance']);
+    Route::get('get-allowance', [EmployeeController::class, 'getAllowance']);
+    Route::post('delete-allowance', [EmployeeController::class, 'deleteAllowance']);
+    Route::post('create-latefee', [EmployeeController::class, 'LateFees']);
+    Route::get('get-latefee', [EmployeeController::class, 'getLateFees']);
+    Route::post('delete-latefee', [EmployeeController::class, 'deleteLateFee']);
+    Route::post('create-overtime', [EmployeeController::class, 'overtime']);
+    Route::get('get-overtime', [EmployeeController::class, 'getOvertime']);
+    Route::post('delete-overtime', [EmployeeController::class, 'deleteOvertime']);
+    Route::post('create-advance', [EmployeeController::class, 'advance']);
+    Route::get('get-advance', [EmployeeController::class, 'getAdvance']);
+    Route::post('delete-advance', [EmployeeController::class, 'deleteAdvance']);
+
+    Route::get('get-generatedsalary', [EmployeeController::class, 'getGeneratedSalary']);
+    Route::post('delete-generatedsalary', [EmployeeController::class, 'deleteGeneratedSalary']);
+    Route::get('get-payslipHistory', [EmployeeController::class, 'getPayslip']);
+    Route::post('delete-payslip', [EmployeeController::class, 'deletePayslip']);
+    Route::get('get-employeepdfImages', [EmployeeController::class, 'getpdfImages']);
+
+
+
+    // Route::post('create-payment', [HelloController::class, 'store']);
+    Route::post('create-payment', [InvoiceController::class, 'store']);
+    Route::post('create-payslip', [PayrollController::class, 'store']);
+    Route::get('get-payslip', [PayrollController::class, 'index']);
+    Route::get('get-detailspayslip', [PayrollController::class, 'detailspayslip']);
+
+    Route::get('/payments/pending', [InvoiceController::class, 'pendingPayments']);
+    Route::post('/payment/approve/{id}', [InvoiceController::class, 'approvePayment']);
+    Route::post('/payment/reject/{id}', [InvoiceController::class, 'rejectPayment']);
+
+    Route::get('get-payment', [InvoiceController::class, 'index']);
+
+    Route::get('get-detailsinvoice', [InvoiceController::class, 'detailsinvoice']);
+    Route::get('get-detailsGenerateBill', [InvoiceController::class, 'GenerateBillData']);
+    Route::get('get-paymentData', [InvoiceController::class, 'paymentData']);
+    Route::post('delete-paymentData', [InvoiceController::class, 'deletePaymentData']);
+
+    //CompanyProfile
+    Route::get('/company-profile', [CompanyProfileController::class, 'index']);
+    Route::post('/company-profile', [CompanyProfileController::class, 'store']);
+    Route::get('/email-setup', [EmailSetupController::class, 'index']);
+    Route::post('/email-setup', [EmailSetupController::class, 'store']);
+    Route::post('/InvoiceSetup', [InvoiceSetupController::class, 'store']);
+    Route::get('/InvoiceSetup', [InvoiceSetupController::class, 'index']);
+
+    //System SEtup
+    Route::get('/SystemSetup', [SystemSetupController::class, 'getSystemSetup']);
+    Route::post('/SystemCommonSetup', [SystemSetupController::class, 'saveCommonSetup']);
+    Route::post('/SystemPayrollSetup', [SystemSetupController::class, 'savePayrollSetup']);
+    Route::post('/SystemClientDisabled', [SystemSetupController::class, 'saveBillingSetup']);
+
+
+
+
+
+    //role and permission
+
+    Route::get('/get-roles', [RoleAndPermissionController::class, 'getAllRoles']);
+    Route::get('/get-roleswithoutSuperAdmin', [RoleAndPermissionController::class, 'getroleswithoutSuperAdmin']);
+    Route::get('/get-roleswithoutpermission', [RoleAndPermissionController::class, 'getRolesWithoutPermission']);
+    Route::post('/create-role', [RoleAndPermissionController::class, 'createRole']);
+    Route::post('/update-role', [RoleAndPermissionController::class, 'updateRole']);
+    Route::post('/delete-role', [RoleAndPermissionController::class, 'deleteRole']);
+    Route::get('/get-rolewithpermissions', [RoleAndPermissionController::class, 'rolewithpermissions']);
+    Route::get('/getbackOrginalPermissions', [RoleAndPermissionController::class, 'getbackOrginalPermissions']);
+    Route::post('/createOrupdate-permission', [RoleAndPermissionController::class, 'createOrupdatePermission']);
+    Route::post('/update-permission', [RoleAndPermissionController::class, 'updatePermission']);
+    Route::post('/remove-permissions', [RoleAndPermissionController::class, 'removePermission']);
+    Route::post('/delete-permission', [RoleAndPermissionController::class, 'deletePermission']);
+    Route::post('/create-appusers', [HelloController::class, 'createAppusers']);
+    Route::post('/check-email', [RoleAndPermissionController::class, 'checkEmail']);
+    Route::post('/update-appusers', [RoleAndPermissionController::class, 'updateAppusers']);
+    Route::post('/delete-appuser', [RoleAndPermissionController::class, 'deleteAppusers']);
+    Route::get('/get-appusers', [RoleAndPermissionController::class, 'getAllAppUsers']);
+    Route::get('/get-users', [RoleAndPermissionController::class, 'getAppUsers']);
+    Route::post('/get-appuserById', [RoleAndPermissionController::class, 'getAppUsersById']);
+    Route::get('/login-history', [RoleAndPermissionController::class, 'loginHistory']);
+    Route::post('/updateAppuserPassword', [RoleAndPermissionController::class, 'updateAppuserPassword']);
+    Route::post('/updateAppuserEmployee', [HelloController::class, 'updateAppuserEmployee']);
+    Route::post('/updateAppuserRole', [RoleAndPermissionController::class, 'updateAppuserRole']);
+    Route::post('/updateAppuserInformation', [RoleAndPermissionController::class, 'updateAppuserInformation']);
+    Route::get('/get-roleandpermission', [RoleAndPermissionController::class, 'RoleAndPermission']);
+    Route::post('/send-sms', [SmsController::class, 'send']);
+
+    //Dashborad data
+    Route::get('/active-clients/{year}', [DashboardController::class, 'getActiveClientsByYear']);
+    Route::get('/new-clients/{year}', [DashboardController::class, 'getMonthlyNewClients']);
+    Route::get('getDashboardData', [DashboardController::class, 'dashboardData']);
+
+
+
+
+    ///reselerrConfiguration
+
+
+    Route::get('/get-resellerzones', [ResellerZoneController::class, 'index'])->middleware('permission:resellerzone,read');
+    Route::post('/create-resellerzones', [ResellerZoneController::class, 'store'])->middleware('permission:resellerzone,write');
+    Route::post('/update-resellerzones', [ResellerZoneController::class, 'update'])->middleware('permission:resellerzone,write');
+    Route::post('/delete-resellerzones', [ResellerZoneController::class, 'destroy'])->middleware('permission:resellerzone,full');
+    Route::post('/resellezones/delete-multiple', [ResellerZoneController::class, 'deleteMultiple'])->middleware('permission:resellerzone,full');
+    //subzone
+    Route::get('/get-resellersubzones', [ResellerSubzoneController::class, 'index'])->middleware('permission:resellersubzone,read');
+    Route::post('/create-resellersubzones', [ResellerSubzoneController::class, 'store'])->middleware('permission:resellersubzone,write');
+    Route::post('/update-resellersubzones', [ResellerSubzoneController::class, 'update'])->middleware('permission:resellersubzone,write');
+    Route::post('/delete-resellersubzones', [ResellerSubzoneController::class, 'destroy'])->middleware('permission:resellersubzone,full');
+    Route::post('/resellesubzone/delete-multiple', [ResellerSubzoneController::class, 'deleteMultiple'])->middleware('permission:resellersubzone,full');
+
+    //box
+    Route::get('/get-resellerbox', [ResellerBoxController::class, 'index'])->middleware('permission:resellerbox,read');
+    Route::get('/create-resellerbox', [ResellerBoxController::class, 'store'])->middleware('permission:resellerbox,write');
+    Route::get('/update-resellerbox', [ResellerBoxController::class, 'update'])->middleware('permission:resellerbox,write');
+    Route::get('/delete-resellerbox', [ResellerBoxController::class, 'destroy'])->middleware('permission:resellerbox,full');
+    Route::post('/resellebox/delete-multiple', [ResellerBoxController::class, 'deleteMultiple'])->middleware('permission:resellerbox,full');
+
+    //districts
+    Route::get('/get-resellerdistrict', [ResellerDistrictController::class, 'index'])->middleware('permission:resellerdistrict,read');
+    Route::post('/create-resellerdistrict', [ResellerDistrictController::class, 'store'])->middleware('permission:resellerdistrict,write');
+    Route::post('/update-resellerdistrict', [ResellerDistrictController::class, 'update'])->middleware('permission:resellerdistrict,write');
+    Route::post('/delete-resellerdistrict', [ResellerDistrictController::class, 'destroy'])->middleware('permission:resellerdistrict,full');
+    Route::post('/reselledistricts/delete-multiple', [ResellerDistrictController::class, 'deleteMultiple'])->middleware('permission:resellerdistrict,full');
+
+    //upzila
+    Route::get('/get-resellerupzila', [ResellerUpzilaController::class, 'index'])->middleware('permission:resellerupzila,read');
+    Route::post('/create-resellerupzila', [ResellerUpzilaController::class, 'store'])->middleware('permission:resellerupzila,write');
+    Route::post('/update-resellerupzila', [ResellerUpzilaController::class, 'update'])->middleware('permission:resellerupzila,write');
+    Route::post('/delete-resellerupzila', [ResellerUpzilaController::class, 'idestroy'])->middleware('permission:resellerupzila,full');
+    Route::post('/reselleupzila/delete-multiple', [ResellerUpzilaController::class, 'deleteMultiple'])->middleware('permission:resellerupzila,full');
+
+    //department
+    Route::get('/get-resellerdepartment', [ResellerDepartmentController::class, 'index'])->middleware('permission:resellerdepartment,read');
+    Route::post('/create-resellerdepartment', [ResellerDepartmentController::class, 'store'])->middleware('permission:resellerdepartment,write');
+    Route::post('/update-resellerdepartment', [ResellerDepartmentController::class, 'update'])->middleware('permission:resellerdepartment,write');
+    Route::post('/delete-resellerdepartment', [ResellerDepartmentController::class, 'destroy'])->middleware('permission:resellerdepartment,full');
+    Route::post('/reselledepartment/delete-multiple', [ResellerDepartmentController::class, 'deleteMultiple'])->middleware('permission:resellerdepartment,full');
+
+    Route::get('/get-resellerposition', [ResellerPositionController::class, 'index'])->middleware('permission:resellerposition,read');
+    Route::post('/create-resellerposition', [ResellerPositionController::class, 'store'])->middleware('permission:resellerposition,write');
+    Route::post('/update-resellerposition', [ResellerPositionController::class, 'update'])->middleware('permission:resellerposition,write');
+    Route::post('/delete-resellerposition', [ResellerPositionController::class, 'destroy'])->middleware('permission:resellerposition,full');
+    Route::post('/reselleposition/delete-multiple', [ResellerPositionController::class, 'deleteMultiple'])->middleware('permission:resellerposition,full');
+
+    //websiteController
+    Route::get('/get-contact', [WebCustomerController::class, 'index'])->middleware('permission:contact,read');
+    Route::post('/delete-contact', [WebCustomerController::class, 'destroy'])->middleware('permission:contact,full');
+    Route::post('/contact/delete-multiple', [WebCustomerController::class, 'deleteMultiple'])->middleware('permission:contact,full');
+
+    Route::get('/get-ConnectionRequest', [WebCustomerController::class, 'getNewLineRequest'])->middleware('permission:new_connection_request,read');
+    Route::post('/delete-ConnectionRequest', [WebCustomerController::class, 'delete'])->middleware('permission:new_connection_request,full');
+    Route::post('/ConnectionRequest/delete-multiple', [WebCustomerController::class, 'deleteMultipleNewline'])->middleware('permission:new_connection_request,full');
+
+
+
+    //inventory Category
+    Route::get('/get-category', [CategoryController::class, 'index'])->middleware('permission:category,read');
+    Route::post('/create-category', [CategoryController::class, 'store'])->middleware('permission:category,write');
+    Route::post('/update-category', [CategoryController::class, 'update'])->middleware('permission:category,write');
+    Route::post('/delete-category', [CategoryController::class, 'destroy'])->middleware('permission:category,full');
+    Route::post('/category/delete-multiple', [CategoryController::class, 'deleteMultiple'])->middleware('permission:category,full');
+
+
+
+    //inventory Product
+    Route::get('/get-product', [ProductController::class, 'index'])->middleware('permission:product,read');
+    Route::post('/create-product', [ProductController::class, 'store'])->middleware('permission:product,write');
+    Route::post('/update-product', [ProductController::class, 'update'])->middleware('permission:product,write');
+    Route::post('/delete-product', [ProductController::class, 'destroy'])->middleware('permission:product,full');
+    Route::post('/product/delete-multiple', [ProductController::class, 'deleteMultiple'])->middleware('permission:product,full');
+
+
+    //inventory Supplier
+    Route::get('/get-supplier', [SupplierController::class, 'index'])->middleware('permission:supplier,read');
+    Route::post('/create-supplier', [SupplierController::class, 'store'])->middleware('permission:supplier,write');
+    Route::post('/update-supplier', [SupplierController::class, 'update'])->middleware('permission:supplier,write');
+    Route::post('/delete-supplier', [SupplierController::class, 'destroy'])->middleware('permission:supplier,full');
+    Route::post('/supplier/delete-multiple', [SupplierController::class, 'deleteMultiple'])->middleware('permission:supplier,full');
+
+    Route::post("/sale-create", [SaleController::class, 'saleCreate'])->middleware('permission:sale,read');
+    Route::get("/sale-select", [SaleController::class, 'saleSelect'])->middleware('permission:sale,read');
+    Route::post("/sale-details", [SaleController::class, 'saleDetails'])->middleware('permission:sale,read');
+    Route::post("/sale-delete", [SaleController::class, 'saleDelete'])->middleware('permission:supplier,read');
+
+
+    //Purchase web api
+    Route::post("/purchase-create", [PurchaseController::class, 'purchaseCreate'])->middleware('permission:purchase,read');
+    Route::get("/purchase-select", [PurchaseController::class, 'purchaseSelect'])->middleware('permission:purchase,read');
+    Route::post("/purchase-details", [PurchaseController::class, 'purchaseDetails'])->middleware('permission:purchase,read');
+    Route::post("/purchase-delete", [PurchaseController::class, 'purchaseDelete'])->middleware('permission:purchase,read');
+
+    //equipment use
+    Route::get('/get-equipmentuse', [EquipmentUseController::class, 'index'])->middleware('permission:equipmentuse,read');
+    Route::post('/create-equipmentuse', [EquipmentUseController::class, 'store'])->middleware('permission:equipmentuse,write');
+
+    Route::post('/delete-equipmentuse', [EquipmentUseController::class, 'destroy'])->middleware('permission:equipmentuse,full');
+    Route::post('/equipmentuse/delete-multiple', [EquipmentUseController::class, 'deleteMultiple'])->middleware('permission:equipmentuse,full');
+
+    //acounting
+    Route::get('/get-bandwidthbill', [BandwidthbillController::class, 'index'])->middleware('permission:bandwidthbill,read');
+    Route::post('/create-bandwidthbill', [BandwidthbillController::class, 'store'])->middleware('permission:bandwidthbill,write');
+
+    Route::post('/delete-bandwidthbill', [BandwidthbillController::class, 'destroy'])->middleware('permission:bandwidthbill,full');
+    Route::post('/bandwidthbill/delete-multiple', [BandwidthbillController::class, 'deleteMultiple'])->middleware('permission:bandwidthbill,full');
+    Route::get('getAccountsData', [AccountsController::class, 'accountsData']);
+});
