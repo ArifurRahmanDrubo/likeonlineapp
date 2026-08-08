@@ -255,6 +255,24 @@ class MacResellerController extends Controller
         }
     }
 
+    public function getMacReseller($id)
+    {
+        try {
+            $macReseller = MacReseller::with('menus')->find($id);
+
+            if (!$macReseller) {
+                return response()->json([
+                    'message' => 'Mac Reseller not found'
+                ], 404);
+            }
+
+            return response()->json($macReseller, 200);
+        } catch (\Exception $e) {
+            return response()->json([
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
     public function getMacResellerbyId(Request $request)
     {
         $id = $request->input('id');

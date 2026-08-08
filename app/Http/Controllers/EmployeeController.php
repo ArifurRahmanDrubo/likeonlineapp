@@ -38,6 +38,26 @@ class EmployeeController extends Controller
             ], 500);
         }
     }
+    public function getEmployee($id)
+    {
+        try {
+            $Employee = Employee::with('payroll')->find($id);
+
+            if (!$Employee) {
+                return response()->json([
+                    'message' => 'Employee not found'
+                ], 404);
+            }
+
+            return response()->json([
+                'Employee' => $Employee
+            ], 200);
+        } catch (\Exception $e) {
+            return response()->json([
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
     public function EmployeeData(Request $request)
     {
         try {

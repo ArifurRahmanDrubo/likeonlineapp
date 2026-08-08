@@ -219,6 +219,7 @@ Route::middleware(['auth:sanctum'])->group(function () {
     Route::post('updateResellerType', [MacResellerController::class, 'updateResellerType'])->middleware('permission:macreseller,write');
     Route::get('getMacResellerbyId', [MacResellerController::class, 'getMacResellerbyId'])->middleware('permission:macreseller,write');
     Route::get('getMacResellerAllDatabyId', [MacResellerController::class, 'getMacResellerAllDatabyId']);
+    Route::get('get-mac-reseller/{id}', [MacResellerController::class, 'getMacReseller']);
 
 
 
@@ -247,6 +248,7 @@ Route::middleware(['auth:sanctum'])->group(function () {
     Route::get('billinglistdashboard', [CustomerController::class, 'billinglistdashboard']);
 
     Route::get('getcustomerData', [CustomerController::class, 'index']);
+    Route::get('get-client/{id}', [CustomerController::class, 'getClient']);
     Route::post('update-clientbillingstatus', [CustomerController::class, 'updateclientbillingstatus']);
     Route::post('update-packageStatus', [CustomerController::class, 'updatepPackageStatus']);
     Route::get('get-pdfImages', [CustomerController::class, 'getpdfImages']);
@@ -280,6 +282,7 @@ Route::middleware(['auth:sanctum'])->group(function () {
     Route::post('remove-mikrotikuser', [CustomerController::class, 'removeMikrotikUser']);
 
     Route::get('getemployee', [EmployeeController::class, 'index']);
+    Route::get('get-employee/{id}', [EmployeeController::class, 'getEmployee']);
     Route::post('create-attendence', [EmployeeController::class, 'attendence']);
     Route::post('update-attendance', [EmployeeController::class, 'updateAttendence']);
     Route::get('get-attendance', [EmployeeController::class, 'getAttendance']);

@@ -42,6 +42,26 @@ class CustomerController extends Controller
             ], 500);
         }
     }
+    public function getClient($id)
+    {
+        try {
+            $customer = Customer::with('invoice')->find($id);
+
+            if (!$customer) {
+                return response()->json([
+                    'message' => 'Client not found'
+                ], 404);
+            }
+
+            return response()->json([
+                'customer' => $customer
+            ], 200);
+        } catch (\Exception $e) {
+            return response()->json([
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
     public function clientData()
     {
         try {
