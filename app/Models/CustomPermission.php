@@ -8,7 +8,15 @@ use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 
 class CustomPermission extends Model
 {
-   protected $guarded = []; 
+    protected $table = 'permissions';
+    protected $fillable = [
+        'name',
+        'guard_name',
+        'type',
+        'module',
+        'created_by',
+        'parent_id'
+    ];
 
     public function roles(): BelongsToMany
     {

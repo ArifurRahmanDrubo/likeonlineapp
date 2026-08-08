@@ -28,7 +28,7 @@ return new class extends Migration
             $table->string('payment_method')->nullable();
             
             // 💳 Payment Status: ট্রানজ্যাকশন/ইনভয়েস পেমেন্টের অবস্থা
-            $table->enum('payment_status', ['pending', 'paid', 'partial', 'failed'])->default('pending');
+            $table->enum('payment_status', ['pending', 'paid', 'partial', 'unpaid'])->default('pending');
             
             // 🛡️ Approval Status: Super Admin এর ভেরিফিকেশন ও অ্যাপ্রুভাল লেয়ার
             $table->enum('approval_status', ['pending', 'approved', 'rejected'])->default('pending');

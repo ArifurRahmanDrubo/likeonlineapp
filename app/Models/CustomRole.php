@@ -7,7 +7,13 @@ use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 
 class CustomRole extends Model
 {
-  protected $guarded = []; 
+    protected $table = 'roles';
+    protected $fillable = [
+        'name',
+        'guard_name',
+        'status',
+        'created_by'
+    ];
     public function users()
     {
         return $this->hasMany(User::class, 'role_id');

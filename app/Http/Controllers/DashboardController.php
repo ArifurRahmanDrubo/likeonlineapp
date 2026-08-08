@@ -19,8 +19,7 @@ class DashboardController extends Controller
     public function getActiveClientsByYear($year)
     {
         // Get all customers created within the year
-        $customers = DB::table('Customers')
-            ->select('created_at', 'billingstatus', 'id')
+        $customers = Customer::select('created_at', 'billingstatus', 'id')
             ->whereYear('created_at', '<=', $year)
             ->get();
 
