@@ -2,29 +2,37 @@
 
 namespace App\Http\Controllers;
 
-use Exception;
-use Carbon\Carbon;
-use App\Models\Invoice;
-use PEAR2\Net\RouterOS;
-
+use App\Models\Box;
+use App\Models\ClientType;
+use App\Models\ConnectionType;
 use App\Models\Customer;
-use Illuminate\Http\Request;
+use App\Models\CustomerBillingStatus;
+use App\Models\District;
+use App\Models\Employee;
 use App\Models\GeneratedBill;
-use App\Models\StatusChanged;
+use App\Models\Invoice;
 use App\Models\MikrotikServer;
+use App\Models\Package;
 use App\Models\PackageChanged;
-// use PEAR2\Net\RouterOS\Client;
+use App\Models\ProtocolType;
+use App\Models\StatusChanged;
 use App\Models\SystemPermission;
+use App\Models\Upazila;
+use App\Models\Upzila;
+use App\Models\Zone;
+use Carbon\Carbon;
+use Dotenv\Exception\ValidationException;
+use Exception;
+use Illuminate\Database\QueryException;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Auth;
-use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\Storage;
-use Dotenv\Exception\ValidationException;
-// use PEAR2\Net\RouterOS\Exception as RouterOSException;
+use PEAR2\Net\RouterOS;
 use RouterOS\Client;
-use RouterOS\Query;
 use RouterOS\Exception as RouterOSException;
+use RouterOS\Query;
 
 class CustomerController extends Controller
 {
@@ -42,6 +50,37 @@ class CustomerController extends Controller
             ], 500);
         }
     }
+    /**
+     * Master init endpoint: fetches all dropdown/lookup data needed by the
+     * Add/Edit Client form in a single request (replaces 11 separate API calls
+     * which used to hit the 429 rate limit).
+     */
+    public function getClientFormInitData()
+    {
+        try {
+            return response()->json([
+                'status'          => true,
+                'clientTypes'     => ClientType::select('id', 'client_type')->orderBy('client_type')->get(),
+                'districts'       => District::select('id', 'districtname')->orderBy('districtname')->get(),
+                'upzilas'         => Upzila::select('id', 'upzilaname')->orderBy('upzilaname')->get(),
+                'zones'           => Zone::select('id', 'zone_name')->orderBy('zone_name')->get(),
+                'servers'         => MikrotikServer::select('id', 'serverName')->orderBy('serverName')->get(),
+                'connectionTypes' => ConnectionType::select('id', 'connection_type')->orderBy('connection_type')->get(),
+                'packages'        => Package::select('id', 'packagename')->orderBy('packagename')->get(),
+                'boxes'           => Box::select('id', 'box_name')->orderBy('box_name')->get(),
+                'protocolTypes'   => ProtocolType::select('id', 'protocol_type')->orderBy('protocol_type')->get(),
+                'billingStatuses' => CustomerBillingStatus::select('id', 'billingstatus')->orderBy('billingstatus')->get(),
+                'employees'       => Employee::select('id', 'name')->orderBy('name')->get(),
+            ], 200);
+        } catch (\Exception $e) {
+            return response()->json([
+                'status'  => false,
+                'message' => 'Failed to load client form data.',
+                'error'   => $e->getMessage()
+            ], 500);
+        }
+    }
+
     public function getClient($id)
     {
         try {

@@ -13,9 +13,9 @@ return new class extends Migration
     {
         Schema::create('customers', function (Blueprint $table) {
             $table->id();
-
+            $table->unsignedBigInteger('user_id')->nullable();
             $table->unsignedBigInteger('server_id')->nullable();
-            $table->string('name');
+            $table->string('name')->nullable();
             $table->string('radius_id')->nullable();
             $table->string('profileimage')->nullable();
             $table->string('occupation')->nullable();
@@ -24,11 +24,19 @@ return new class extends Migration
             $table->string('nidimage')->nullable();
             $table->enum('gender', ['male', 'female', 'other'])->nullable();
             $table->string('dateofbirth')->nullable();
+            $table->string('caller_id')->nullable();
+            $table->string('ipv6_routes')->nullable();
+            $table->string('last_caller_id')->nullable();
+            $table->string('last_disconnect_reason')->nullable();
+            $table->string('last_logged_out')->nullable();
+            $table->string('limit_bytes_in')->nullable();
+            $table->string('limit_bytes_out')->nullable();
+            $table->string('routes')->nullable();
             $table->string('registrationno')->nullable();
             $table->string('registrationimage')->nullable();
-            $table->string('profileimage_public_id')->nullable()->after('profileimage');
-            $table->string('nidimage_public_id')->nullable()->after('nidimage');
-            $table->string('registrationimage_public_id')->nullable()->after('registrationimage');
+            $table->string('profileimage_public_id')->nullable();
+            $table->string('nidimage_public_id')->nullable();
+            $table->string('registrationimage_public_id')->nullable();
             $table->string('fathername')->nullable();;
             $table->string('mothername')->nullable();;
             $table->decimal('latitude', 10, 7)->nullable();
@@ -47,30 +55,29 @@ return new class extends Migration
             $table->text('paraddress')->nullable();
             $table->string('server')->nullable();
             $table->string('subzone')->nullable();
-            $table->string('zone');
-            $table->string('protocoltype');
+            $table->string('zone')->nullable();
+            $table->string('protocoltype')->nullable();
             $table->string('box')->nullable();
-            $table->string('connectiontype');
+            $table->string('connectiontype')->nullable();
             $table->string('cable')->nullable();
             $table->string('fiber')->nullable();
             $table->string('coreno')->nullable();
             $table->string('corecolor')->nullable();
-            $table->string('package');
+            $table->string('package')->nullable();
             $table->string('profile')->nullable();
             $table->string('username')->unique();
             $table->string('password');
-            $table->string('clienttype');
-            $table->string('expireddate');
+            $table->string('clienttype')->nullable();
+            $table->string('expireddate')->nullable();
             $table->string('referenceby')->nullable();
             $table->string('connectedby')->nullable();
             // $table->string('caller-id')->nullable();
             $table->string('con_charge')->nullable();
-            $table->string('joiningdate');
-            $table->string('billingmonth');
-            $table->string('billingstatus');
-            $table->decimal('monthlybill', 8, 2);
+            $table->string('joiningdate')->nullable();
+            $table->string('billingmonth')->nullable();
+            $table->string('billingstatus')->nullable();
+            $table->decimal('monthlybill', 8, 2)->nullable();
             $table->boolean('mikrotikStatus')->default(true);
-            $table->foreign('server_id')->references('id')->on('mikrotikservers')->onDelete('cascade');
 
             $table->timestamps();
         });

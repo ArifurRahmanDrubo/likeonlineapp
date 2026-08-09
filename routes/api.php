@@ -199,11 +199,12 @@ Route::middleware(['auth:sanctum'])->group(function () {
     Route::get('hello', [HelloController::class, 'hello']);
     Route::post('user-status', [HelloController::class, 'UserStatus']);
     Route::get('get-mikrotikserver', [MikroTikController::class, 'index'])->middleware('permission:mikrotik_server,read');
+    Route::get('get-muser/{id}', [MikroTikController::class, 'getMUser']);
 
     Route::post('update-mikrotikserver', [MikroTikController::class, 'update'])->middleware('permission:mikrotik_server,write');
     Route::post('delete-mikrotikserver', [MikroTikController::class, 'destroy'])->middleware('permission:mikrotik_server,full');
     Route::post('create-mikrotikserver', [MikroTikController::class, 'store'])->middleware('permission:mikrotik_server,write');
-
+    Route::post('/mikrotik/sync/{serverId}', [MikrotikController::class, 'syncServerData']);
     Route::post('getusers-mikrotikserver', [MikroTikController::class, 'getUsers']);
     //pppoeProfile
     Route::get('get-PPPOEProfile', [PppoeProfile::class, 'getpppoeProfile']);
@@ -248,6 +249,8 @@ Route::middleware(['auth:sanctum'])->group(function () {
     Route::get('billinglistdashboard', [CustomerController::class, 'billinglistdashboard']);
 
     Route::get('getcustomerData', [CustomerController::class, 'index']);
+    //Master init: all AddNewClient dropdown/lookup data in one request
+    Route::get('client-form-init', [CustomerController::class, 'getClientFormInitData']);
     Route::get('get-client/{id}', [CustomerController::class, 'getClient']);
     Route::post('update-clientbillingstatus', [CustomerController::class, 'updateclientbillingstatus']);
     Route::post('update-packageStatus', [CustomerController::class, 'updatepPackageStatus']);

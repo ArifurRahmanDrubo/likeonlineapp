@@ -14,6 +14,7 @@ return new class extends Migration
         Schema::create('new_requests', function (Blueprint $table) {
             $table->id();
             $table->string('name');
+              $table->unsignedBigInteger('user_id')->nullable();
             $table->string('occupation')->nullable();
             $table->text('remarks')->nullable();
             $table->string('profileimage')->nullable();
@@ -27,7 +28,7 @@ return new class extends Migration
             $table->string('mothername')->nullable();
             $table->string('facebook')->nullable();
             $table->string('linkidn')->nullable();
-            $table->string('mobile');
+            $table->string('mobile')->nullable();
             $table->string('phone')->nullable();
             $table->string('email')->nullable();
             $table->string('district')->nullable();
@@ -37,12 +38,12 @@ return new class extends Migration
             $table->string('praddress')->nullable();
             $table->string('paraddress')->nullable();
             $table->string('subzone')->nullable();
-            $table->string('zone');
-            $table->string('connectiontype');
-            $table->string('package');
+            $table->string('zone')->nullable();
+            $table->string('connectiontype')->nullable();
+            $table->string('package')->nullable();
             $table->string('referencecontact')->nullable();
-            $table->string('clienttype');
-            $table->string('commiteddate');
+            $table->string('clienttype')->nullable();
+            $table->string('commiteddate')->nullable();
             $table->string('referenceby')->nullable();
             $table->string('createdby')->nullable();
             $table->string('profileimage_public_id')->nullable()->after('profileimage');
@@ -50,7 +51,7 @@ return new class extends Migration
             $table->string('registrationimage_public_id')->nullable()->after('registrationimage');
             $table->json('assign_to')->nullable();
             $table->string('status')->nullable()->default('Pending');
-            $table->string('billingstatus');
+            $table->string('billingstatus')->nullable();
             $table->decimal('monthlybill', 8, 2);
             $table->timestamps();
         });

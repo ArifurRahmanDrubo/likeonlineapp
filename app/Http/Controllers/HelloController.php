@@ -2,25 +2,26 @@
 
 namespace App\Http\Controllers;
 
-use Exception;
-use Carbon\Carbon;
-use RouterOS\Query;
-use App\Models\User;
-use RouterOS\Client;
-use App\Models\Invoice;
-use App\Models\Payment;
-use App\Models\Customer;
-use App\Models\Employee;
-use App\Models\CustomRole;
-use Illuminate\Http\Request;
-use App\Models\MikrotikServer;
 use App\Mail\PaymentSuccessMail;
-use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Log;
+use App\Models\Customer;
+use App\Models\CustomRole;
+use App\Models\Employee;
+use App\Models\Invoice;
+use App\Models\MikrotikServer;
+use App\Models\MUser;
+use App\Models\Payment;
+use App\Models\User;
+use Carbon\Carbon;
+use Exception;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
+use RouterOS\Client;
 use RouterOS\Exception as RouterOSException;
+use RouterOS\Query;
 
 class HelloController extends Controller
 {
@@ -107,22 +108,22 @@ class HelloController extends Controller
             $serverid = $request->input('serverId');
             $userid = $request->input('userid');
 
-            $mikrotikServer = MikrotikServer::findOrFail($serverid);
-            $mikrotikStatus = $request->input('mikrotikStatus');
-            $disabled = $mikrotikStatus ? 'false' : 'true';
+            $mikrotikServer = MikrotikServer::find($serverid);
+            $mikrotikStatus = $request->input('disabled');
+            $disabled = $mikrotikStatus ? 'true' : 'false';
             $client = new Client([
                 'host' => $mikrotikServer->serverip,
                 'user' => $mikrotikServer->Username,
                 'pass' => $mikrotikServer->password,
                 'port' => $mikrotikServer->port,
             ]);
-
-
-            // Update the user's disabled status
             $updateRequest = new Query('/ppp/secret/set');
             $updateRequest->equal('.id', $userid);
             $updateRequest->equal('disabled', $disabled);
             $client->query($updateRequest)->read();
+
+            $user = MUser::where('mikrotik_id', $userid)->where('server_id', $serverid)->first();
+            $user->update(['disabled' => $mikrotikStatus]);
             return response()->json(['status' => 'success', 'message' => 'User status updated successfully']);
         } catch (Exception $e) {
             Log::error("Failed to update PPPoE user statusss: {$e->getMessage()}");

@@ -54,9 +54,9 @@ class MikrotikServerController extends Controller
                 'Username' => 'required|string|max:255',
                 'password' => 'required|string|max:255',
                 'port' => 'required|integer',
-                'version' => 'required|string|max:255',
-                'timeout' => 'required|integer',
-                'status' => 'required|string',
+                // 'version' => 'required|string|max:255',
+                // 'timeout' => 'required|integer',
+                // 'status' => 'required|string',
             ]);
             $server = MikrotikServer::create($request->all());
             return response()->json(['message' => 'MikrotikServer created successfully']);
@@ -77,9 +77,9 @@ class MikrotikServerController extends Controller
                 'Username' => 'string|max:255',
                 'password' => 'string|max:255',
                 'port' => 'integer',
-                'version' => 'string|max:255',
-                'timeout' => 'integer',
-                'status' => 'string',
+                // 'version' => 'string|max:255',
+                // 'timeout' => 'integer',
+                // 'status' => 'string',
             ]);
             $id = $request->input('id');
             $serverName = $request->input('serverName');
