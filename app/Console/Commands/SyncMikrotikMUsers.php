@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands;
 
+use App\Models\IPPool;
 use App\Models\MikrotikServer;
 use App\Models\MProfile;
 use App\Models\MUser; // নিশ্চিত করুন আপনার MUser Model তৈরি আছে
@@ -10,6 +11,7 @@ use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Log;
 use RouterOS\Client;
 use RouterOS\Query;
+
 class SyncMikrotikMUsers extends Command
 {
     protected $signature = 'mikrotik:sync-m-users';
@@ -91,6 +93,8 @@ class SyncMikrotikMUsers extends Command
                             'change_tcp_mss' => $item['change-tcp-mss'] ?? null,
                             'default' => isset($item['default']) && $item['default'] === 'true',
                             'dns_server' => $item['dns-server'] ?? null,
+                            'local_address' => $item['local-address'] ?? null,
+                            'remote_address' => $item['remote-address'] ?? null,
                             'on_down' => $item['on-down'] ?? null,
                             'on_up' => $item['on-up'] ?? null,
                             'only_one' => $item['only-one'] ?? null,
@@ -101,6 +105,26 @@ class SyncMikrotikMUsers extends Command
                             'use_upnp' => $item['use-upnp'] ?? null,
                         ]
                     );
+                }
+
+                $ipPoolQuery = new Query('/ip/pool/print');
+                $ippools = $client->query($ipPoolQuery)->read();
+
+                foreach ($ippools as $item) {
+                    if (empty($item['name']))
+                        continue;
+
+                    IPPool::updateOrCreate(
+                        [
+                            'server_id' => $server->id,
+                            'name' => $item['name'],
+                        ],
+                        [
+                            'mikrotik_id' => $item['.id'] ?? null,
+                            'ranges' => $item['ranges'] ?? null,
+                        ]
+                    );
+
                 }
 
                 $this->info("Successfully synced  Server: {$server->serverName} ({$server->serverip})");

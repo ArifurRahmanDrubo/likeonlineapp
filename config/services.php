@@ -31,4 +31,10 @@ return [
         'region' => env('AWS_DEFAULT_REGION', 'us-east-1'),
     ],
 
+    // Node.js monitoring-service (Phase 2)
+    'monitoring' => [
+        'base_url' => env('MONITORING_SERVICE_URL', 'http://127.0.0.1:3000'),
+        'secret' => env('INTERNAL_API_SECRET', ''),
+    ],
+
 ];

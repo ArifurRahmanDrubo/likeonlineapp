@@ -1,6 +1,8 @@
 <?php
 namespace App\Http\Controllers;
 // require 'vendor/autoload.php';
+use App\Models\Customer;
+use App\Models\IPPool;
 use App\Models\MikrotikServer;
 use App\Models\MProfile;
 use App\Models\MUser;
@@ -9,8 +11,10 @@ use Carbon\Carbon;
 use Exception;
 use Illuminate\Contracts\Encryption\DecryptException;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\Crypt;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use PEAR2\Net\RouterOS\Exception as RouterOSException;
 use RouterOS\Client;
@@ -211,31 +215,10 @@ public function getUsers(Request $request)
     public function getPppoeProfiles(Request $request)
     {
         try {
-            // $id = $request->input('id');
-            // Log::info("Received id: {$id}");
-            $mikrotikServer = MikrotikServer::find();
-            $client = new Client([
-                'host' => $mikrotikServer->serverip,
-                'user' => $mikrotikServer->Username,
-                'pass' => $mikrotikServer->password,
-                'port' => $mikrotikServer->port,
-            ]);
-            Log::info("Connected to MikroTik server: " . $mikrotikServer->serverip);
-            $request = new Query('/ppp/profile/print');
-            $responses = $client->query($request)->read();
-            $profiles = [];
-            foreach ($responses as $response) {
-                // Extract all properties of the response
-                $profileProperties = [];
-                foreach ($response as $key => $value) {
-                    $profileProperties[$key] = $value;
-                }
-                $profiles[] = $profileProperties; // Store all properties of each user
-            }
-            Log::info("Received PPPoE profiles from MikroTik server: ", $profiles);
-            if (empty($profiles)) {
-                Log::warning("No PPPoE profiles received from MikroTik server.");
-            }
+       
+            $mikrotikServer = MikrotikServer::find($request->input('id'));
+            $profiles = MProfile::where('server_id', $mikrotikServer->id)->get();
+        
             return response()->json($profiles);
         } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
             return response()->json(['error' => 'MikrotikServer not found.'], 404);
@@ -352,7 +335,7 @@ public function getUsers(Request $request)
                 );
             }
 
-            $profileQuery = new Query('/ppp/profile/print');
+                $profileQuery = new Query('/ppp/profile/print');
                 $profiles = $client->query($profileQuery)->read();
 
                 foreach ($profiles as $item) {
@@ -371,6 +354,8 @@ public function getUsers(Request $request)
                             'change_tcp_mss' => $item['change-tcp-mss'] ?? null,
                             'default' => isset($item['default']) && $item['default'] === 'true',
                             'dns_server' => $item['dns-server'] ?? null,
+                             'local_address' => $item['local-address'] ?? null,
+                            'remote_address' => $item['remote-address'] ?? null,
                             'on_down' => $item['on-down'] ?? null,
                             'on_up' => $item['on-up'] ?? null,
                             'only_one' => $item['only-one'] ?? null,
@@ -382,6 +367,27 @@ public function getUsers(Request $request)
                         ]
                     );
                 }
+
+            $ipPoolQuery = new Query('/ip/pool/print');
+            $ippools = $client->query($ipPoolQuery)->read();
+
+            foreach ($ippools as $item) {
+                if (empty($item['name']))
+                    continue;
+
+                IPPool::updateOrCreate(
+                    [
+                        'server_id' => $server->id,
+                        'name' => $item['name'],
+                    ],
+                    [
+                        'mikrotik_id' => $item['.id'] ?? null,
+                        'ranges' => $item['ranges'] ?? null,
+                    ]
+                );
+
+            }
+
 
             return response()->json([
                 'status' => true,
@@ -395,6 +401,252 @@ public function getUsers(Request $request)
                 'status' => false,
                 'message' => 'Connection failed: ' . $e->getMessage()
             ], 500);
+        }
+    }
+
+    /**
+     * Live Traffic Monitoring trigger.
+     *
+     * Called by the LiveMonitoring.vue page every ~1 second. It connects to the
+     * MikroTik router, snapshots the traffic of the dynamic PPPoE interface named
+     * after the client's username (/interface monitor-traffic ... once), normalizes
+     * the values and broadcasts them over Pusher on channel traffic.{mikrotik_id}
+     * so the open browser tab(s) update in real time.
+     *
+     * @param  \Illuminate\Http\Request $request  Expects mikrotik_id, username, server_id
+     * @return \Illuminate\Http\JsonResponse
+     */
+    // public function triggerLiveTraffic(Request $request)
+    // {
+    //     $startedAt = microtime(true);
+    //     $mikrotikId = $request->input('mikrotik_id');
+    //     $stateKey = 'live_traffic_' . ($mikrotikId ?: '0') . '_' . ($mikrotikId ?: $mikrotikId ?: 'anon');
+    //     $wasOnline = (bool) Cache::get($stateKey, false);
+
+    //     try {
+    //         // 1) Resolve username + server from the DB where possible.
+    //         //    mikrotik_id == RouterOS secret .id (customers.radius_id) and
+    //         //    MUser.name == the PPPoE username (customers.username).
+    //         $mUser = null;
+    //         if ($mikrotikId) {
+    //             $mUser = Customer::where('mikrotik_id', $mikrotikId)->first();
+    //         }
+
+    //         $server = MikrotikServer::find($mUser->server_id);
+    //         if (!$server) {
+    //             return response()->json(['status' => 'error', 'message' => 'MikroTik server not found'], 404);
+    //         }
+
+    //         // 2) Connect to the router (same pattern as the rest of this controller)
+    //         $client = new Client([
+    //             'host' => $server->serverip,
+    //             'user' => $server->Username,
+    //             'pass' => $server->password,
+    //             'port' => $server->port,
+    //         ]);
+    //         $client->connect();
+
+    //         // 3) One-shot traffic snapshot for the interface named after the PPPoE user.
+    //         //    'once' makes RouterOS return a single sample instead of streaming forever.
+    //         $query = (new Query('/interface/monitor-traffic'))
+    //             ->equal('interface', $mUser->username)
+    //             ->equal('once', '');
+    //         $responses = $client->query($query)->read();
+
+    //         // 4) Normalize into a compact, frontend-friendly payload.
+    //         //    RouterOS reports bits/s → convert to Mbps.
+    //         $sample = $responses[0] ?? [];
+    //         $rxBits = (float) ($sample['rx-bits-per-second'] ?? 0);
+    //         $txBits = (float) ($sample['tx-bits-per-second'] ?? 0);
+    //         $online = count($responses) > 0;
+
+    //         $payload = [
+    //             'mikrotik_id'   => $mikrotikId,
+    //             'username'      => $$mUser->username,
+    //             'download_mbps' => round($rxBits / 1_000_000, 3),
+    //             'upload_mbps'   => round($txBits / 1_000_000, 3),
+    //             'rx_pps'        => (int) ($sample['rx-packets-per-second'] ?? 0),
+    //             'tx_pps'        => (int) ($sample['tx-packets-per-second'] ?? 0),
+    //             'online'        => $online,
+    //             'latency_ms'    => round((microtime(true) - $startedAt) * 1000, 1),
+    //             'timestamp'     => now()->toIso8601String(),
+    //         ];
+
+    //         // 5) Push to every open monitoring tab for this client (sync broadcast).
+    //         broadcast(new UserTrafficUpdated($payload['mikrotik_id'], $payload));
+    //         Cache::put($stateKey, true, now()->addMinutes(10));
+
+    //         return response()->json(['status' => 'success', 'data' => $payload], 200);
+    //     } catch (\Throwable $e) {
+    //         // User offline (no interface) or router unreachable → flip the UI to Offline
+    //         // instead of freezing it. Log it and keep the poll loop alive.
+    //         Log::error("triggerLiveTraffic failed [user:]: {$e->getMessage()}");
+
+    //         $offline = [
+    //             'mikrotik_id'   => $mikrotikId ?: ($username ?? ''),
+    //             'username'      => $mUser->username,
+    //             'download_mbps' => 0,
+    //             'upload_mbps'   => 0,
+    //             'rx_pps'        => 0,
+    //             'tx_pps'        => 0,
+    //             'online'        => false,
+    //             'latency_ms'    => round((microtime(true) - $startedAt) * 1000, 1),
+    //             'timestamp'     => now()->toIso8601String(),
+    //         ];
+
+    //         // Only broadcast the offline flip once per transition — the HTTP
+    //         // response below still delivers the offline payload on every poll.
+    //         if ($wasOnline && $offline['mikrotik_id']) {
+    //             broadcast(new UserTrafficUpdated($offline['mikrotik_id'], $offline));
+    //         }
+    //         Cache::put($stateKey, false, now()->addMinutes(10));
+
+    //         return response()->json(['status' => 'offline', 'data' => $offline], 200);
+    //     }
+    // }
+
+    /**
+     * Start real-time traffic monitoring via the Node.js monitoring-service.
+     *
+     * Called by LiveMonitoring.vue on page load. Resolves the customer's RouterOS
+     * server from the DB, then proxies to POST {MONITORING_SERVICE_URL}/monitor/start
+     * with the shared X-Internal-Secret header. The microservice keeps a 2-second
+     * polling loop alive and streams snapshots to public Pusher channel traffic.{key}.
+     */
+public function startMonitoring(Request $request)
+{
+    $request->validate([
+        'mikrotik_id' => ['required'],
+    ]);
+
+    $mikrotikId = trim((string) $request->input('mikrotik_id'));
+
+    /*
+    |--------------------------------------------------------------------------
+    | 1. Actual customer খুঁজবে
+    |--------------------------------------------------------------------------
+    */
+    $customer = Customer::where('radius_id', $mikrotikId)->first();
+
+    if (! $customer) {
+        return response()->json([
+            'status' => 'error',
+            'message' => 'Customer not found',
+        ], 404);
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | 2. Customer-এর MikroTik server
+    |--------------------------------------------------------------------------
+    */
+    if (! $customer->server_id) {
+        return response()->json([
+            'status' => 'error',
+            'message' => 'Customer has no MikroTik server assigned',
+        ], 404);
+    }
+
+    $server = MikrotikServer::find($customer->server_id);
+
+    if (! $server) {
+        return response()->json([
+            'status' => 'error',
+            'message' => 'MikroTik server not found',
+        ], 404);
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | 3. Customer-এর actual RouterOS username
+    |--------------------------------------------------------------------------
+    */
+    if (! $customer->username) {
+        return response()->json([
+            'status' => 'error',
+            'message' => 'Customer username is missing',
+        ], 404);
+    }
+
+    try {
+
+        /*
+        |--------------------------------------------------------------------------
+        | 4. Laravel -> Node Monitoring Service
+        |--------------------------------------------------------------------------
+        */
+        $response = Http::timeout(10)
+            ->withHeaders([
+                'X-Internal-Secret' => config('services.monitoring.secret'),
+            ])
+            ->post(
+                rtrim(
+                    (string) config('services.monitoring.base_url'),
+                    '/'
+                ) . '/monitor/start',
+                [
+                    // Customer identification
+                    'mikrotik_id' => (string) $customer->radius_id,
+                    'username'    => (string) $customer->username,
+                    'service'     => $customer->protocoltype ?? 'ppp',
+                    'ip'          => $customer->ip ?? '',
+
+                    // MikroTik connection
+                    'host'        => $server->serverip,
+                    'port'        => (int) $server->port,
+                    'server_user' => $server->Username,
+                    'password'    => $server->password,
+                ]
+            );
+
+        return response()->json(
+            $response->json(),
+            $response->status()
+        );
+
+    } catch (\Throwable $e) {
+
+        Log::error(
+            'Failed to reach monitoring-service',
+            [
+                'mikrotik_id' => $mikrotikId,
+                'customer_id' => $customer->id,
+                'server_id' => $server->id,
+                'error' => $e->getMessage(),
+            ]
+        );
+
+        return response()->json([
+            'status' => 'error',
+            'message' => 'Monitoring service unreachable',
+        ], 502);
+    }
+}
+
+    /**
+     * Explicitly stop a running monitor in the Node.js monitoring-service.
+     * (The automatic stop path is the Pusher channel_vacated webhook.)
+     */
+    public function stopMonitoring(Request $request)
+    {
+        $mikrotikId = $request->input('mikrotik_id');
+
+        if (! $mikrotikId) {
+            return response()->json(['status' => 'error', 'message' => 'mikrotik_id is required'], 400);
+        }
+
+        try {
+            $response = Http::timeout(10)
+                ->withHeaders(['X-Internal-Secret' => config('services.monitoring.secret')])
+                ->post(rtrim((string) config('services.monitoring.base_url'), '/').'/monitor/stop', [
+                    'mikrotik_id' => $mikrotikId,
+                ]);
+
+            return response()->json($response->json(), $response->status());
+        } catch (\Throwable $e) {
+            Log::error("Failed to reach monitoring-service: {$e->getMessage()}");
+
+            return response()->json(['status' => 'error', 'message' => 'Monitoring service unreachable'], 502);
         }
     }
 

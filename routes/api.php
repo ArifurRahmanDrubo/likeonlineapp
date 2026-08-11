@@ -89,6 +89,8 @@ Route::post('/logout', [AuthController::class, 'logout'])->middleware('auth:sanc
 Route::post('/logoutOtherUser', [AuthController::class, 'logoutOtherUser'])->middleware('auth:sanctum')->name('logoutOtherUser');
 Route::get('/user', [AuthController::class, 'user'])->middleware('auth:sanctum');
 Route::middleware('auth:sanctum')->get('/user-permissions', [RoleAndPermissionController::class, 'getUserPermissions']);
+
+
 Route::middleware(['auth:sanctum'])->group(function () {
     //configuration
     Route::get('get-zones', [ZoneController::class, 'index'])->middleware('permission:zone,read');
@@ -204,13 +206,20 @@ Route::middleware(['auth:sanctum'])->group(function () {
     Route::post('update-mikrotikserver', [MikroTikController::class, 'update'])->middleware('permission:mikrotik_server,write');
     Route::post('delete-mikrotikserver', [MikroTikController::class, 'destroy'])->middleware('permission:mikrotik_server,full');
     Route::post('create-mikrotikserver', [MikroTikController::class, 'store'])->middleware('permission:mikrotik_server,write');
-    Route::post('/mikrotik/sync/{serverId}', [MikrotikController::class, 'syncServerData']);
+    Route::post('/mikrotik/sync/{serverId}', [MikroTikController::class, 'syncServerData']);
     Route::post('getusers-mikrotikserver', [MikroTikController::class, 'getUsers']);
+    // Route::post('mikrotik/trigger-live-traffic', [MikroTikController::class, 'triggerLiveTraffic']);
+    Route::post('mikrotik/start-monitoring', [MikroTikController::class, 'startMonitoring']);
+    Route::post('mikrotik/stop-monitoring', [MikroTikController::class, 'stopMonitoring']);
     //pppoeProfile
     Route::get('get-PPPOEProfile', [PppoeProfile::class, 'getpppoeProfile']);
     Route::get('get-PPPOEIPpool', [PppoeProfile::class, 'getpppoeIPpool']);
     Route::post('create-PPPOEProfile', [PppoeProfile::class, 'createpppoeProfile']);
-    Route::post('create-PPPOEIPpool', [PppoeProfile::class, 'createpppoeIppool']);
+    Route::post('edit-PPPOEProfile', [PppoeProfile::class, 'editpppoeProfile']);
+    Route::post('delete-PPPOEProfile', [PppoeProfile::class, 'deletepppoeProfile']);
+    Route::post('create-PPPOEIpPool', [PppoeProfile::class, 'createpppoeIppool']);
+    Route::post('edit-PPPOEIpPool', [PppoeProfile::class, 'editPppoeIppool']);
+    Route::post('delete-PPPOEIpPool', [PppoeProfile::class, 'deletePppoeIppool']);
     Route::get('getProfile-mikrotikserver', [MikroTikController::class, 'getPppoeProfiles']);
     Route::post('mikrotikserver/delete-multiple', [MikroTikController::class, 'deleteMultiple'])->middleware('permission:mikrotik_server,full');
     Route::get('get-MacReseller', [MacResellerController::class, 'index'])->middleware('permission:macreseller,read');

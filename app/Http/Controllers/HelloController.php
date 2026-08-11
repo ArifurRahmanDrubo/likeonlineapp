@@ -25,34 +25,104 @@ use RouterOS\Query;
 
 class HelloController extends Controller
 {
+public function clientList(Request $request)
+{
+    try {
+        $customers = Customer::with('invoice')->get();
+        $mikrotikServers = MikrotikServer::get();
+        $serverData = [];
+        foreach ($mikrotikServers as $mikrotikServer) {
 
+            try {
 
-    public function clientList(Request $request)
-    {
-        try {
-            $customers = Customer::with('invoice')->get();
-            $mikrotikServer = MikrotikServer::first();
-            $client = new Client([
-                'host' => $mikrotikServer->serverip,
-                'user' => $mikrotikServer->Username,
-                'pass' => $mikrotikServer->password,
-                'port' => $mikrotikServer->port,
-            ]);
-            // $client = new Client($mikrotikServer->serverip, $mikrotikServer->Username, $mikrotikServer->password, $mikrotikServer->port);
-            // $request = new RouterOS\Request('/ppp/active/print');
-            $request = new Query('/ppp/active/print');
-            // $responses = $client->sendSync($request);
-            $responses = $client->query($request)->read();
+                $client = new Client([
+                    'host' => $mikrotikServer->serverip,
+                    'user' => $mikrotikServer->Username,
+                    'pass' => $mikrotikServer->password,
+                    'port' => $mikrotikServer->port,
+                ]);
 
-            return response()->json([
-                'customers' => $customers,
-                'serverData' => $responses
-            ], 200);
-        } catch (Exception $e) {
-            Log::error("Failed to fetch users from Mikrotik Server: {$e->getMessage()}");
-            throw new \Exception("Failed to fetch users from Mikrotik Server");
+                $query = new Query('/ppp/active/print');
+
+                $responses = $client
+                    ->query($query)
+                    ->read();
+
+                foreach ($responses as $item) {
+
+                    if (empty($item['name'])) {
+                        continue;
+                    }
+
+                    $serverData[] = [
+                        'server_id' => $mikrotikServer->id,
+                        'name'      => $item['name'],
+                        'caller-id' => $item['caller-id'] ?? null,
+                        'address'   => $item['address'] ?? null,
+                    ];
+                }
+
+            } catch (\Exception $e) {
+
+                // একটি MikroTik সমস্যা করলে অন্য server-এর data আসবে
+                Log::error(
+                    "Failed to fetch PPP active data",
+                    [
+                        'server_id' => $mikrotikServer->id,
+                        'server'    => $mikrotikServer->serverName ?? null,
+                        'message'   => $e->getMessage(),
+                    ]
+                );
+
+                continue;
+            }
         }
+
+        return response()->json([
+            'success'   => true,
+            'customers' => $customers,
+            'serverData' => $serverData,
+        ], 200);
+
+    } catch (\Exception $e) {
+
+        Log::error(
+            "Failed to fetch client list: {$e->getMessage()}"
+        );
+
+        return response()->json([
+            'success' => false,
+            'message' => 'Failed to fetch client list.',
+        ], 500);
     }
+}
+
+    // public function clientList(Request $request)
+    // {
+    //     try {
+    //         $customers = Customer::with('invoice')->get();
+    //         $mikrotikServer = MikrotikServer::first();
+    //         $client = new Client([
+    //             'host' => $mikrotikServer->serverip,
+    //             'user' => $mikrotikServer->Username,
+    //             'pass' => $mikrotikServer->password,
+    //             'port' => $mikrotikServer->port,
+    //         ]);
+    //         // $client = new Client($mikrotikServer->serverip, $mikrotikServer->Username, $mikrotikServer->password, $mikrotikServer->port);
+    //         // $request = new RouterOS\Request('/ppp/active/print');
+    //         $request = new Query('/ppp/active/print');
+    //         // $responses = $client->sendSync($request);
+    //         $responses = $client->query($request)->read();
+
+    //         return response()->json([
+    //             'customers' => $customers,
+    //             'serverData' => $responses
+    //         ], 200);
+    //     } catch (Exception $e) {
+    //         Log::error("Failed to fetch users from Mikrotik Server: {$e->getMessage()}");
+    //         throw new \Exception("Failed to fetch users from Mikrotik Server");
+    //     }
+    // }
     public function DeleteClient(Request $request)
     {
         try {

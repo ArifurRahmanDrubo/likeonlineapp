@@ -22,6 +22,10 @@ return new class extends Migration {
             $table->text('on_down')->nullable();
             $table->text('on_up')->nullable();
             $table->string('only_one')->nullable();
+            $table->string('local_address')->nullable();
+            $table->string('remote_address')->nullable();
+            $table->decimal('max_upload', 10, 2)->nullable();
+            $table->decimal('max_download', 10, 2)->nullable();
             $table->string('use_compression')->nullable();
             $table->string('use_encryption')->nullable();
             $table->string('use_ipv6')->nullable();
@@ -30,7 +34,8 @@ return new class extends Migration {
             $table->unsignedBigInteger('server_id')->nullable();
             $table->timestamps();
             $table->index('name');
-            $table->index('server_id'); });
+            $table->index('server_id');
+        });
     }
 
     /**

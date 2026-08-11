@@ -6,12 +6,12 @@ use App\Models\MikrotikServer;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 
-class MProfile extends Model
+class IPPool extends Model
 {
     use HasFactory;
     protected $guarded = [];
 
-        public function server()
+    public function server()
     {
         return $this->belongsTo(MikrotikServer::class, 'server_id');
     }
