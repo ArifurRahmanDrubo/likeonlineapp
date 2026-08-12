@@ -27,68 +27,18 @@ class HelloController extends Controller
 {
 public function clientList(Request $request)
 {
+    // Server-side pagination only — search is NOT handled here.
+    // The Vue ClientList page performs reactive client-side search across
+    // all columns, so no `search` parameter is ever sent to this endpoint.
+    // Live MikroTik session data is fetched on-demand per customer
+    // via GET /api/customers/{id}/live-mac (never during page load).
     try {
-        $customers = Customer::with('invoice')->get();
-        $mikrotikServers = MikrotikServer::get();
-        $serverData = [];
-        foreach ($mikrotikServers as $mikrotikServer) {
+        $perPage = max(1, $request->integer('per_page', 25));
 
-            try {
-
-                $client = new Client([
-                    'host' => $mikrotikServer->serverip,
-                    'user' => $mikrotikServer->Username,
-                    'pass' => $mikrotikServer->password,
-                    'port' => $mikrotikServer->port,
-                ]);
-
-                $query = new Query('/ppp/active/print');
-
-                $responses = $client
-                    ->query($query)
-                    ->read();
-
-                foreach ($responses as $item) {
-
-                    if (empty($item['name'])) {
-                        continue;
-                    }
-
-                    $serverData[] = [
-                        'server_id' => $mikrotikServer->id,
-                        'name'      => $item['name'],
-                        'caller-id' => $item['caller-id'] ?? null,
-                        'address'   => $item['address'] ?? null,
-                    ];
-                }
-
-            } catch (\Exception $e) {
-
-                // একটি MikroTik সমস্যা করলে অন্য server-এর data আসবে
-                Log::error(
-                    "Failed to fetch PPP active data",
-                    [
-                        'server_id' => $mikrotikServer->id,
-                        'server'    => $mikrotikServer->serverName ?? null,
-                        'message'   => $e->getMessage(),
-                    ]
-                );
-
-                continue;
-            }
-        }
-
-        return response()->json([
-            'success'   => true,
-            'customers' => $customers,
-            'serverData' => $serverData,
-        ], 200);
-
+        // Standard Laravel pagination JSON: data, current_page, last_page, total, per_page.
+        return Customer::paginate($perPage);
     } catch (\Exception $e) {
-
-        Log::error(
-            "Failed to fetch client list: {$e->getMessage()}"
-        );
+        Log::error("Failed to fetch client list: {$e->getMessage()}");
 
         return response()->json([
             'success' => false,

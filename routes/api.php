@@ -254,6 +254,7 @@ Route::middleware(['auth:sanctum'])->group(function () {
     Route::get('billingLists', [CustomerController::class, 'index']);
     Route::get('clientProfileData', [CustomerController::class, 'clientData']);
     Route::get('clientList', [HelloController::class, 'clientList']);
+    Route::get('customers/{id}/live-mac', [CustomerController::class, 'getCustomerLiveMac']);
     Route::get('clientlistdashboard', [CustomerController::class, 'clientlistdashboard']);
     Route::get('billinglistdashboard', [CustomerController::class, 'billinglistdashboard']);
 

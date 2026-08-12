@@ -764,82 +764,181 @@ class CustomerController extends Controller
     }
 
 
+    /**
+     * On-demand live session check (GET /api/customers/{id}/live-mac).
+     *
+     * Queries ONLY the customer's assigned MikroTik server for a single
+     * username, so a page load never touches the routers. Connection/query
+     * failures are handled gracefully and reported as "offline" instead of
+     * throwing a 500.
+     */
+    public function getCustomerLiveMac($id)
+    {
+        try {
+            $customer = Customer::find($id);
+            if (!$customer) {
+                return response()->json(['message' => 'Customer not found.'], 404);
+            }
+
+            if (empty($customer->server_id)) {
+                return response()->json([
+                    'is_online'  => false,
+                    'live_mac'   => null,
+                    'ip_address' => null,
+                ], 200);
+            }
+
+            $server = MikrotikServer::find($customer->server_id);
+            if (!$server) {
+                return response()->json([
+                    'is_online'  => false,
+                    'live_mac'   => null,
+                    'ip_address' => null,
+                ], 200);
+            }
+
+            $client = new Client([
+                'host' => $server->serverip,
+                'user' => $server->Username,
+                'pass' => $server->password,
+                'port' => $server->port,
+            ]);
+
+            $query = new Query('/ppp/active/print');
+            $query->where('name', $customer->username);
+            $responses = $client->query($query)->read();
+
+            foreach ($responses as $item) {
+                if (($item['name'] ?? null) === $customer->username) {
+                    return response()->json([
+                        'is_online'  => true,
+                        'live_mac'   => $item['caller-id'] ?? null,
+                        'ip_address' => $item['address'] ?? null,
+                    ], 200);
+                }
+            }
+
+            // Username not present in active sessions
+            return response()->json([
+                'is_online'  => false,
+                'live_mac'   => null,
+                'ip_address' => null,
+            ], 200);
+        } catch (\Exception $e) {
+            // Router unreachable/query failed — never break the UI, report offline
+            Log::error("Failed to check live MAC for customer {$id}: {$e->getMessage()}");
+            return response()->json([
+                'is_online'  => false,
+                'live_mac'   => null,
+                'ip_address' => null,
+            ], 200);
+        }
+    }
+
     public function bindMac(Request $request)
     {
         try {
-            $mac_address = $request->input('mac_address');
-            $id = $request->input('id');
+            $mac_address = trim((string) $request->input('mac_address'));
+            $id = $request->input('customer_id') ?: $request->input('id');
             $server_id = $request->input('server_id');
             $radius_id = $request->input('radius_id');
-            $customer = Customer::find($id);
-            $server = MikrotikServer::find($server_id);
-            if ($server) {
-                $client = new Client([
-                    'host' => $server->serverip,
-                    'user' => $server->Username,
-                    'pass' => $server->password,
-                    'port' => $server->port,
-                ]);
-                // $client = new Client($server->serverip, $server->Username, $server->password, $server->port);
-                // $updateRequest = new RouterOS\Request('/ppp/secret/set');
-                $updateRequest = new Query('/ppp/secret/set');
-                // $updateRequest->setArgument('.id', $radius_id);
-                $updateRequest->equal('.id', $radius_id);
-                $updateRequest->equal('caller-id', $mac_address);
-                $client->query($updateRequest)->read();
 
-                $customer->update([
-                    'caller_id' => $mac_address
-                ]);
+            if ($mac_address === '') {
+                return response()->json(['message' => 'MAC address is required to bind.'], 422);
             }
+
+            $customer = Customer::find($id);
+            if (!$customer) {
+                return response()->json(['message' => 'Customer not found.'], 404);
+            }
+
+            $server = MikrotikServer::find($server_id);
+            if (!$server) {
+                return response()->json(['message' => 'MikroTik server not found.'], 404);
+            }
+
+            // Fall back to the stored radius_id if the request omits it
+            $radius_id = $radius_id ?: $customer->radius_id;
+            if (empty($radius_id)) {
+                return response()->json(['message' => 'Customer has no MikroTik user id to bind.'], 422);
+            }
+
+            // 1) Update MikroTik: /ppp/secret/set caller-id = {mac_address}
+            $client = new Client([
+                'host' => $server->serverip,
+                'user' => $server->Username,
+                'pass' => $server->password,
+                'port' => $server->port,
+            ]);
+            $updateRequest = new Query('/ppp/secret/set');
+            $updateRequest->equal('.id', $radius_id);
+            $updateRequest->equal('caller-id', $mac_address);
+            $client->query($updateRequest)->read();
+
+            // 2) Persist the bound MAC in the local database
+            $customer->update([
+                'caller_id' => $mac_address
+            ]);
+
             return response()->json([
-                'message' => ' Mac_address Bind  successfully.'
+                'message'   => 'MAC address bound successfully.',
+                'caller_id' => $mac_address
             ], 200);
         } catch (\Exception $e) {
+            Log::error("Failed to bind MAC address: {$e->getMessage()}");
             return response()->json([
-
-                'message' => $e->getMessage(),
-
+                'message' => 'Failed to bind MAC address.',
             ], 500);
         }
     }
     public function unbindMac(Request $request)
     {
         try {
-
+            $id = $request->input('customer_id') ?: $request->input('id');
             $server_id = $request->input('server_id');
             $radius_id = $request->input('radius_id');
-            $id = $request->input('id');
-            $customer = Customer::find($id);
-            $mac_address = '';
-            $server = MikrotikServer::find($server_id);
-            if ($server) {
-                $client = new Client([
-                    'host' => $server->serverip,
-                    'user' => $server->Username,
-                    'pass' => $server->password,
-                    'port' => $server->port,
-                ]);
-                // $client = new Client($server->serverip, $server->Username, $server->password, $server->port);
-                // $updateRequest = new RouterOS\Request('/ppp/secret/set');
-                $updateRequest = new Query('/ppp/secret/set');
-                // $updateRequest->setArgument('.id', $radius_id);
-                $updateRequest->equal('.id', $radius_id);
-                $updateRequest->equal('caller-id', $mac_address);
-                $client->query($updateRequest)->read();
 
-                $customer->update([
-                    'caller_id' => null
-                ]);
+            $customer = Customer::find($id);
+            if (!$customer) {
+                return response()->json(['message' => 'Customer not found.'], 404);
             }
+
+            $server = MikrotikServer::find($server_id);
+            if (!$server) {
+                return response()->json(['message' => 'MikroTik server not found.'], 404);
+            }
+
+            // Fall back to the stored radius_id if the request omits it
+            $radius_id = $radius_id ?: $customer->radius_id;
+            if (empty($radius_id)) {
+                return response()->json(['message' => 'Customer has no MikroTik user id to unbind.'], 422);
+            }
+
+            // 1) Clear caller-id on MikroTik: /ppp/secret/set caller-id = ""
+            $client = new Client([
+                'host' => $server->serverip,
+                'user' => $server->Username,
+                'pass' => $server->password,
+                'port' => $server->port,
+            ]);
+            $updateRequest = new Query('/ppp/secret/set');
+            $updateRequest->equal('.id', $radius_id);
+            $updateRequest->equal('caller-id', '');
+            $client->query($updateRequest)->read();
+
+            // 2) Clear the MAC field in the local database
+            $customer->update([
+                'caller_id' => null
+            ]);
+
             return response()->json([
-                'message' => ' Mac_address UnBind  successfully.'
+                'message'   => 'MAC address unbound successfully.',
+                'caller_id' => null
             ], 200);
         } catch (\Exception $e) {
+            Log::error("Failed to unbind MAC address: {$e->getMessage()}");
             return response()->json([
-
-                'message' => $e->getMessage(),
-
+                'message' => 'Failed to unbind MAC address.',
             ], 500);
         }
     }
@@ -847,79 +946,145 @@ class CustomerController extends Controller
     public function bindSelectedMacAddresses(Request $request)
     {
         try {
-            foreach ($request->users as $user) {
-                $customer = Customer::find($user['id']);
-                if ($customer) {
-                    $server = MikrotikServer::find($user['server_id']);
-                    if ($server) {
-                        $client = new Client([
-                            'host' => $server->serverip,
-                            'user' => $server->Username,
-                            'pass' => $server->password,
-                            'port' => $server->port,
-                        ]);
-                        // $client = new Client($server->serverip, $server->Username, $server->password, $server->port);
-                        // $updateRequest = new RouterOS\Request('/ppp/secret/set');
-                        $updateRequest = new Query('/ppp/secret/set');
-                        // $updateRequest->setArgument('.id', $user['radius_id']);
-                        $updateRequest->equal('.id', $user['radius_id']);
-                        $updateRequest->equal('caller-id', $user['mac_address']);
-                        $client->query($updateRequest)->read();
+            $users = $request->input('users', []);
+            if (empty($users)) {
+                return response()->json(['message' => 'No users selected.'], 422);
+            }
 
-                        $customer->update([
-                            'caller_id' => $user['mac_address']
-                        ]);
+            $bound  = 0;
+            $failed = 0;
+            foreach ($users as $user) {
+                // Per-user try/catch so one bad router/user never aborts the whole batch
+                try {
+                    $customer = Customer::find($user['id'] ?? null);
+                    if (!$customer) {
+                        $failed++;
+                        continue;
                     }
+
+                    $server = MikrotikServer::find($user['server_id'] ?? null);
+                    if (!$server) {
+                        $failed++;
+                        continue;
+                    }
+
+                    $mac_address = trim((string) ($user['mac_address'] ?? ''));
+                    $radius_id   = $user['radius_id'] ?? $customer->radius_id;
+                    if ($mac_address === '' || empty($radius_id)) {
+                        $failed++;
+                        continue;
+                    }
+
+                    $client = new Client([
+                        'host' => $server->serverip,
+                        'user' => $server->Username,
+                        'pass' => $server->password,
+                        'port' => $server->port,
+                    ]);
+                    $updateRequest = new Query('/ppp/secret/set');
+                    $updateRequest->equal('.id', $radius_id);
+                    $updateRequest->equal('caller-id', $mac_address);
+                    $client->query($updateRequest)->read();
+
+                    $customer->update([
+                        'caller_id' => $mac_address
+                    ]);
+                    $bound++;
+                } catch (\Exception $e) {
+                    $userId = $user['id'] ?? 'unknown';
+                    Log::error("Failed to bind MAC for user {$userId}: {$e->getMessage()}");
+                    $failed++;
                 }
             }
+
+            $message = "{$bound} MAC address(es) bound successfully";
+            if ($failed > 0) {
+                $message .= ", {$failed} failed.";
+            } else {
+                $message .= '.';
+            }
+
             return response()->json([
-                'message' => ' Mac_address Bind  successfully.'
+                'message' => $message,
+                'bound'   => $bound,
+                'failed'  => $failed
             ], 200);
         } catch (\Exception $e) {
+            Log::error("Failed to bind selected MAC addresses: {$e->getMessage()}");
             return response()->json([
-
-                'message' => $e->getMessage(),
-
+                'message' => 'Failed to bind selected MAC addresses.',
             ], 500);
         }
     }
     public function unbindSelectedMacAddresses(Request $request)
     {
         try {
-            foreach ($request->users as $user) {
-                $customer = Customer::find($user['id']);
+            $users = $request->input('users', []);
+            if (empty($users)) {
+                return response()->json(['message' => 'No users selected.'], 422);
+            }
 
-                if ($customer) {
-                    $server = MikrotikServer::find($user['server_id']);
-                    if ($server) {
-                        $client = new Client([
-                            'host' => $server->serverip,
-                            'user' => $server->Username,
-                            'pass' => $server->password,
-                            'port' => $server->port,
-                        ]);
-                        // $client = new Client($server->serverip, $server->Username, $server->password, $server->port);
-                        // $updateRequest = new RouterOS\Request('/ppp/secret/set');
-                        $updateRequest = new Query('/ppp/secret/set');
-                        // $updateRequest->setArgument('.id', $user['radius_id']);
-                        $updateRequest->equal('.id', $user['radius_id']);
-                        $updateRequest->equal('caller-id', '');
-                        $client->query($updateRequest)->read();
-
-                        $customer->update([
-                            'caller_id' => null
-                        ]);
+            $unbound = 0;
+            $failed  = 0;
+            foreach ($users as $user) {
+                // Per-user try/catch so one bad router/user never aborts the whole batch
+                try {
+                    $customer = Customer::find($user['id'] ?? null);
+                    if (!$customer) {
+                        $failed++;
+                        continue;
                     }
+
+                    $server = MikrotikServer::find($user['server_id'] ?? null);
+                    if (!$server) {
+                        $failed++;
+                        continue;
+                    }
+
+                    $radius_id = $user['radius_id'] ?? $customer->radius_id;
+                    if (empty($radius_id)) {
+                        $failed++;
+                        continue;
+                    }
+
+                    $client = new Client([
+                        'host' => $server->serverip,
+                        'user' => $server->Username,
+                        'pass' => $server->password,
+                        'port' => $server->port,
+                    ]);
+                    $updateRequest = new Query('/ppp/secret/set');
+                    $updateRequest->equal('.id', $radius_id);
+                    $updateRequest->equal('caller-id', '');
+                    $client->query($updateRequest)->read();
+
+                    $customer->update([
+                        'caller_id' => null
+                    ]);
+                    $unbound++;
+                } catch (\Exception $e) {
+                    $userId = $user['id'] ?? 'unknown';
+                    Log::error("Failed to unbind MAC for user {$userId}: {$e->getMessage()}");
+                    $failed++;
                 }
             }
+
+            $message = "{$unbound} MAC address(es) unbound successfully";
+            if ($failed > 0) {
+                $message .= ", {$failed} failed.";
+            } else {
+                $message .= '.';
+            }
+
             return response()->json([
-                'message' => ' Mac_address UnBind  successfully.'
+                'message' => $message,
+                'unbound' => $unbound,
+                'failed'  => $failed
             ], 200);
         } catch (\Exception $e) {
+            Log::error("Failed to unbind selected MAC addresses: {$e->getMessage()}");
             return response()->json([
-
-                'message' => $e->getMessage(),
-
+                'message' => 'Failed to unbind selected MAC addresses.',
             ], 500);
         }
     }
