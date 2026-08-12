@@ -13,6 +13,7 @@
         "laravel/framework": "^10.0",
         "laravel/sanctum": "^3.3",
         "laravel/tinker": "^2.8",
+        "mpdf/mpdf": "^8.2",
         "pear2/net_routeros": "^1.0@beta",
         "predis/predis": "^2.2",
         "pusher/pusher-php-server": "^7.3",

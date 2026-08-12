@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Box;
 use App\Models\ClientType;
+use App\Models\CompanyProfile;
 use App\Models\ConnectionType;
 use App\Models\Customer;
 use App\Models\CustomerBillingStatus;
@@ -26,7 +27,6 @@ use Exception;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
-use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use PEAR2\Net\RouterOS;
@@ -84,7 +84,9 @@ class CustomerController extends Controller
     public function getClient($id)
     {
         try {
-            $customer = Customer::with('invoice')->find($id);
+            // Single eager-loaded query: avoids the N+1 lookups the profile
+            // page previously triggered for invoice + server data.
+            $customer = Customer::with(['invoice', 'server'])->find($id);
 
             if (!$customer) {
                 return response()->json([
@@ -327,8 +329,8 @@ class CustomerController extends Controller
             $billingstatus = $request->input('billingstatus');
             $notes = $request->input('notes');
             $executiondate = $request->input('executiondate');
-            $date = Carbon::parse($executiondate);
-            $formattedDate = $date->format('d F Y');
+            // Only stamp a date when one is provided (Carbon::parse(null) would silently record "now")
+            $formattedDate = $executiondate ? Carbon::parse($executiondate)->format('d F Y') : null;
 
             $customer = Customer::where('id', $customer_id)->first();
             StatusChanged::create([
@@ -380,8 +382,8 @@ class CustomerController extends Controller
             $package = $request->input('package');
             $monthlybill = $request->input('monthlybill');
             $executiondate = $request->input('executiondate');
-            $date = Carbon::parse($executiondate);
-            $formattedDate = $date->format('d F Y');
+            // Only stamp a date when one is provided (Carbon::parse(null) would silently record "now")
+            $formattedDate = $executiondate ? Carbon::parse($executiondate)->format('d F Y') : null;
 
             // Fetch the customer
             $customer = Customer::findOrFail($customer_id);
@@ -402,8 +404,11 @@ class CustomerController extends Controller
             $updateData = [];
             if ($profile) {
                 $updateData['profile'] = $profile;
-                // Update MikroTik server if profile is provided
-                $mikrotikServer = MikrotikServer::findOrFail($request->input('server_id'));
+                // Update MikroTik server if profile is provided.
+                // Fall back to the customer's stored server when the request
+                // omits server_id (the frontend never sent it, which used to
+                // make every package change throw a ModelNotFoundException).
+                $mikrotikServer = MikrotikServer::findOrFail($request->input('server_id') ?: $customer->server_id);
                 $client = new Client([
                     'host' => $mikrotikServer->serverip,
                     'user' => $mikrotikServer->Username,
@@ -449,64 +454,144 @@ class CustomerController extends Controller
             ], 500);
         }
     }
-    public function getpdfImages(Request $request)
+    /**
+     * Relations that must be eager-loaded for each optional PDF section.
+     * Only the relations required by the user-selected sections are loaded,
+     * so generating a "Profile only" PDF never queries payments/bills/etc.
+     */
+    protected const PDF_SECTION_RELATIONS = [
+        'Profile'        => [],
+        'Service'        => [],
+        'Personal'       => [],
+        'Network'        => ['server'],
+        'ReceivedBill'   => ['payment'],
+        'ProductSell'    => [],
+        'GenerateBill'   => ['generatedBill'],
+        'Message'        => [],
+        'CustomerStatus' => ['statusChanged'],
+    ];
+
+    /**
+     * Generates a PDF of the client profile (backend, mPDF) containing only
+     * the sections requested via ?sections[]=Profile&sections[]=Service...
+     *
+     * Replaces the old frontend html2canvas+jsPDF pipeline (slow, layout
+     * breaking, and silently dropped the Message/ProductSell/CustomerStatus
+     * selections) with a single server-side request.
+     */
+    public function generateClientProfilePdf(Request $request)
     {
         try {
-            $id = $request->input('id');
-            $customer = Customer::find($id);
+            $id       = (int) $request->query('id');
+            $sections = $request->query('sections', []);
 
-            if (!$customer) {
-                return response()->json([
-                    'error' => 'Customer not found'
-                ], 404);
+            // Normalize sections (single value or array) and drop unknown keys
+            $sections = is_array($sections) ? $sections : [$sections];
+            $sections = array_values(array_intersect(array_keys(self::PDF_SECTION_RELATIONS), $sections));
+            if (empty($sections)) {
+                $sections = ['Profile'];
             }
 
-            // Convert an image (Cloudinary URL or legacy local path) to a base64 data URL
-            $base64Image = function ($image) {
-                if (!$image) {
-                    return null;
-                }
+            // Dynamically eager-load ONLY the relations used by selected sections
+            $relations = collect($sections)
+                ->flatMap(fn ($key) => self::PDF_SECTION_RELATIONS[$key] ?? [])
+                ->unique()
+                ->values()
+                ->all();
 
-                try {
-                    if (filter_var($image, FILTER_VALIDATE_URL)) {
-                        // Image stored as a remote (Cloudinary) URL
-                        $response = Http::timeout(30)->get($image);
-                        if (!$response->successful()) {
-                            return null;
-                        }
-                        $imageData = $response->body();
-                        $mimeType = strtok($response->header('Content-Type') ?: 'application/octet-stream', ';');
-                    } else {
-                        // Legacy image stored as a local path
-                        $path = public_path($image);
-                        if (!file_exists($path)) {
-                            return null;
-                        }
-                        $imageData = file_get_contents($path);
-                        $mimeType = mime_content_type($path) ?: 'application/octet-stream';
-                    }
-                } catch (\Exception $e) {
-                    return null;
-                }
+            $customer = Customer::with($relations)->findOrFail($id);
+            $company  = CompanyProfile::first();
 
-                if (empty($imageData)) {
-                    return null;
-                }
+            $html = view('pdf.client-profile', [
+                'customer'          => $customer,
+                'company'           => $company,
+                'sections'          => $sections,
+                'billingStartMonth' => $this->formatMonthYear($customer->billingmonth),
+                // Direct image URLs (not base64) — mPDF fetches them at render time
+                'images'            => [
+                    'profile'      => $this->resolveImageUrl($customer->profileimage),
+                    'nid'          => $this->resolveImageUrl($customer->nidimage),
+                    'registration' => $this->resolveImageUrl($customer->registrationimage),
+                    'company'      => $this->resolveImageUrl($company?->image),
+                ],
+            ])->render();
 
-                return 'data:' . $mimeType . ';base64,' . base64_encode($imageData);
-            };
+            $tempDir = storage_path('app/pdf-tmp');
+            if (!is_dir($tempDir)) {
+                mkdir($tempDir, 0775, true);
+            }
 
-            return response()->json([
-                'profileImage' => $base64Image($customer->profileimage),
-                'nidImage' => $base64Image($customer->nidimage),
-                'registrationImage' => $base64Image($customer->registrationimage)
-            ], 200);
+            $mpdf = new \Mpdf\Mpdf([
+                'mode'          => 'utf-8',
+                'format'        => 'A4',
+                'margin_left'   => 12,
+                'margin_right'  => 12,
+                'margin_top'    => 14,
+                'margin_bottom' => 14,
+                'tempDir'       => $tempDir,
+            ]);
+            $mpdf->SetTitle('Client Profile - ' . $customer->name);
+            $mpdf->SetAuthor($company->title ?? config('app.name'));
+            $mpdf->WriteHTML($html);
+
+            return response(
+                $mpdf->Output('ClientProfile.pdf', \Mpdf\Output\Destination::STRING_RETURN),
+                200,
+                [
+                    'Content-Type'        => 'application/pdf',
+                    'Content-Disposition' => 'attachment; filename="ClientProfile.pdf"',
+                ]
+            );
         } catch (\Exception $e) {
+            Log::error("Failed to generate client profile PDF for customer {$request->query('id')}: {$e->getMessage()}");
             return response()->json([
-                'error' => 'An error occurred while fetching customer images.',
-                'message' => $e->getMessage()
+                'message' => 'Failed to generate the PDF.',
+                'error'   => $e->getMessage(),
             ], 500);
         }
+    }
+
+    /**
+     * Format a date-ish string as "Month Year" (e.g. "March 2024") so the PDF
+     * never exposes a full stored timestamp. Falls back to the raw value when
+     * it cannot be parsed.
+     */
+    protected function formatMonthYear($value): string
+    {
+        if (empty($value)) {
+            return 'N/A';
+        }
+        try {
+            return Carbon::parse($value)->format('F Y');
+        } catch (\Throwable $e) {
+            return $value;
+        }
+    }
+
+    /**
+     * Return a directly-embeddable image URL for the PDF.
+     * Full URLs (e.g. Cloudinary) are passed through untouched; legacy
+     * relative paths are turned into an absolute URL built from the app URL
+     * (asset() may return a root-relative path when there is no incoming
+     * request). Note: mPDF requires allow_url_fopen or the curl extension
+     * to fetch remote images.
+     */
+    protected function resolveImageUrl(?string $image): ?string
+    {
+        if (empty($image)) {
+            return null;
+        }
+
+        if (filter_var($image, FILTER_VALIDATE_URL)) {
+            return $image;
+        }
+
+        $base = rtrim((string) config('app.url'), '/');
+        if ($base === '') {
+            $base = url('/');
+        }
+
+        return $base . (str_starts_with($image, '/') ? '' : '/') . $image;
     }
 
     public function addMikrotikUser($mikrotikServer, $username, $password, $profile, $fullComment,   $service = 'pppoe')

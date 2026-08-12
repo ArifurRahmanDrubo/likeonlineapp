@@ -264,7 +264,8 @@ Route::middleware(['auth:sanctum'])->group(function () {
     Route::get('get-client/{id}', [CustomerController::class, 'getClient']);
     Route::post('update-clientbillingstatus', [CustomerController::class, 'updateclientbillingstatus']);
     Route::post('update-packageStatus', [CustomerController::class, 'updatepPackageStatus']);
-    Route::get('get-pdfImages', [CustomerController::class, 'getpdfImages']);
+    // Backend PDF generation (mPDF): only the sections passed via sections[] are rendered
+    Route::get('get-client-pdf', [CustomerController::class, 'generateClientProfilePdf']);
 
     Route::post('updatebulkstatus', [CustomerController::class, 'updatebulkStatus'])->middleware('permission:bulk_status_change,write');
     Route::post('disabledSelectedClient', [CustomerController::class, 'disabledSelectedClient']);
