@@ -8,10 +8,21 @@ use Illuminate\Database\Eloquent\Model;
 class StatusChanged extends Model
 {
     use HasFactory;
+
     protected $table = 'status_changed';
 
-    // Optionally, define the fillable properties
-    protected $fillable = ['billingstatus', 'customer_id', 'notes', 'executiondate'];
+    protected $fillable = [
+        'customer_id',
+        'old_billingstatus',
+        'billingstatus',
+        'notes',
+        'requested_by',
+        'executiondate',
+        'status',
+        'error_log',
+        'rejection_reason',
+    ];
+
     public function customer()
     {
         return $this->belongsTo(Customer::class);

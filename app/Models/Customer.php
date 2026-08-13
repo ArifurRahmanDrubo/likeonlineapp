@@ -11,10 +11,19 @@ class Customer extends Model
   protected $guarded = []; 
     protected $appends = ['formatted_id'];
 
+    protected $casts = [
+        'left_date' => 'datetime',
+    ];
+
+    // public function getFormattedIdAttribute()
+    // {
+    //     return str_pad($this->attributes['id'], 4, '0', STR_PAD_LEFT);
+    // }
+
     public function getFormattedIdAttribute()
-    {
-        return str_pad($this->attributes['id'], 4, '0', STR_PAD_LEFT);
-    }
+{
+    return str_pad((string) ($this->id ?? 0), 4, '0', STR_PAD_LEFT);
+}
 
     public function user()
     {
@@ -46,10 +55,10 @@ class Customer extends Model
         return $this->hasMany(PackageChanged::class);
     }
 
-    public function server()
-    {
-        return $this->belongsTo(MikrotikServer::class);
-    }
+public function server()
+{
+    return $this->belongsTo(MikrotikServer::class, 'server_id', 'id');
+}
 
     protected static function boot()
     {

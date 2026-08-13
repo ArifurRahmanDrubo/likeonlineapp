@@ -78,8 +78,14 @@ class DashboardController extends Controller
         $InactiveClient = Customer::where('mikrotikStatus', false)->count();
         $OnlineClient = Customer::where('mikrotikStatus', true)->count();
 
-        $RunningClient = Customer::where('billingstatus', '!=', 'Left')->count();
-        $LeftClient = Customer::where('billingstatus', '=', 'Left')->count();
+        $RunningClient = Customer::where('billingstatus', '!=', 'Left')
+            ->where(function ($q) {
+                $q->whereNull('status')->orWhere('status', '!=', 'left');
+            })
+            ->count();
+        $LeftClient = Customer::where(function ($q) {
+            $q->where('status', 'left')->orWhere('billingstatus', 'Left');
+        })->count();
         $FreeClient = Customer::where('billingstatus', '=', 'Free')->count();
         // Get the first and current date of the current month
         $startOfMonth = Carbon::now()->startOfMonth();

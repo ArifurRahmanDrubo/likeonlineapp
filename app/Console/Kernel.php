@@ -30,6 +30,12 @@ class Kernel extends ConsoleKernel
             ->at('00:01')
             ->withoutOverlapping()
             ->onOneServer();
+
+        // Process due scheduled package/status changes once a day
+        $schedule->command('isp:process-scheduled-changes')
+            ->dailyAt('00:01')
+            ->withoutOverlapping()
+            ->onOneServer();
     }
 
     /**

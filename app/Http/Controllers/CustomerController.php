@@ -21,6 +21,7 @@ use App\Models\SystemPermission;
 use App\Models\Upazila;
 use App\Models\Upzila;
 use App\Models\Zone;
+use App\Services\ScheduledChangeService;
 use Carbon\Carbon;
 use Dotenv\Exception\ValidationException;
 use Exception;
@@ -59,24 +60,24 @@ class CustomerController extends Controller
     {
         try {
             return response()->json([
-                'status'          => true,
-                'clientTypes'     => ClientType::select('id', 'client_type')->orderBy('client_type')->get(),
-                'districts'       => District::select('id', 'districtname')->orderBy('districtname')->get(),
-                'upzilas'         => Upzila::select('id', 'upzilaname')->orderBy('upzilaname')->get(),
-                'zones'           => Zone::select('id', 'zone_name')->orderBy('zone_name')->get(),
-                'servers'         => MikrotikServer::select('id', 'serverName')->orderBy('serverName')->get(),
+                'status' => true,
+                'clientTypes' => ClientType::select('id', 'client_type')->orderBy('client_type')->get(),
+                'districts' => District::select('id', 'districtname')->orderBy('districtname')->get(),
+                'upzilas' => Upzila::select('id', 'upzilaname')->orderBy('upzilaname')->get(),
+                'zones' => Zone::select('id', 'zone_name')->orderBy('zone_name')->get(),
+                'servers' => MikrotikServer::select('id', 'serverName')->orderBy('serverName')->get(),
                 'connectionTypes' => ConnectionType::select('id', 'connection_type')->orderBy('connection_type')->get(),
-                'packages'        => Package::select('id', 'packagename')->orderBy('packagename')->get(),
-                'boxes'           => Box::select('id', 'box_name')->orderBy('box_name')->get(),
-                'protocolTypes'   => ProtocolType::select('id', 'protocol_type')->orderBy('protocol_type')->get(),
+                'packages' => Package::select('id', 'packagename')->orderBy('packagename')->get(),
+                'boxes' => Box::select('id', 'box_name')->orderBy('box_name')->get(),
+                'protocolTypes' => ProtocolType::select('id', 'protocol_type')->orderBy('protocol_type')->get(),
                 'billingStatuses' => CustomerBillingStatus::select('id', 'billingstatus')->orderBy('billingstatus')->get(),
-                'employees'       => Employee::select('id', 'name')->orderBy('name')->get(),
+                'employees' => Employee::select('id', 'name')->orderBy('name')->get(),
             ], 200);
         } catch (\Exception $e) {
             return response()->json([
-                'status'  => false,
+                'status' => false,
                 'message' => 'Failed to load client form data.',
-                'error'   => $e->getMessage()
+                'error' => $e->getMessage()
             ], 500);
         }
     }
@@ -118,10 +119,312 @@ class CustomerController extends Controller
         }
     }
 
+    /**
+     * Build a MikroTik API client from a server record.
+     * (Used by the left-client flow; the rest of the controller still
+     * constructs clients inline for now.)
+     */
+    protected function mikrotikClient(MikrotikServer $server): Client
+    {
+        return new Client([
+            'host' => $server->serverip,
+            'user' => $server->Username,
+            'pass' => $server->password,
+            'port' => $server->port,
+        ]);
+    }
+
+    /**
+     * Convert "Delete Customer" into "Make Left Client".
+     *
+     * 1. Disables the PPPoE secret on the assigned MikroTik server.
+     * 2. Terminates any live /ppp/active session for the username.
+     * 3. Clears the caller-id (MAC) binding on the secret.
+     * 4. Updates the local record: status='left', left_date=now(),
+     *    left_reason, caller_id=null, and frees onu_mac when the
+     *    ONU/router was returned.
+     *
+     * The local update always runs — a router being unreachable logs a
+     * warning instead of blocking the DB change.
+     */
+    public function makeClientLeft(Request $request)
+    {
+        try {
+            $validated = $request->validate([
+                'id' => 'required|integer',
+                'left_reason' => 'required|string|max:255',
+                'onu_returned' => 'nullable|boolean',
+            ]);
+
+            $id = $validated['id'];
+            $leftReason = $validated['left_reason'];
+            $onuReturned = $request->boolean('onu_returned');
+
+            $customer = Customer::with('server')->find($id);
+            if (!$customer) {
+                return response()->json(['message' => 'Client not found.'], 404);
+            }
+            if ($customer->status === 'left') {
+                return response()->json(['message' => 'Client is already marked as left.'], 422);
+            }
+
+            $warnings = [];
+
+            // 1-3) Router operations (only when a server + radius id exist)
+            if ($customer->server_id && $customer->radius_id) {
+                try {
+                    $server = $customer->server ?? MikrotikServer::find($customer->server_id);
+                    if ($server) {
+                        // $client = $this->mikrotikClient($server);
+
+                        $client = new Client([
+                            'host' => $server->serverip,
+                            'user' => $server->Username,
+                            'pass' => $server->password,
+                            'port' => $server->port,
+                        ]);
+                        $client->connect();
+
+                        // a) Disable the user in /ppp/secret
+                        $disable = new Query('/ppp/secret/set');
+                        $disable->equal('.id', $customer->radius_id);
+                        $disable->equal('disabled', 'true');
+                        $client->query($disable)->read();
+
+                        // b) Terminate any active session immediately
+                        $activeQuery = new Query('/ppp/active/print');
+                        $activeQuery->where('name', $customer->username);
+                        $sessions = $client->query($activeQuery)->read();
+                        foreach ($sessions as $session) {
+                            if (($session['name'] ?? null) === $customer->username && !empty($session['.id'])) {
+                                $remove = new Query('/ppp/active/remove');
+                                $remove->equal('.id', $session['.id']);
+                                $client->query($remove)->read();
+                                break;
+                            }
+                        }
+
+                        // c) Clear/unbind caller-id on the secret
+                        $unbind = new Query('/ppp/secret/set');
+                        $unbind->equal('.id', $customer->radius_id);
+                        $unbind->equal('caller-id', '');
+                        $client->query($unbind)->read();
+                    }
+                } catch (\Exception $e) {
+                    Log::warning("MikroTik left-client steps failed for customer {$id}: {$e->getMessage()}");
+                    $warnings[] = 'MikroTik update skipped: ' . $e->getMessage();
+                }
+            }
+
+            // 4) Local record — always updated.
+            // billingstatus is kept in sync ('Left') so legacy dashboards that
+            // still read the old field count these clients correctly.
+            $update = [
+                'status' => 'left',
+                'billingstatus' => 'Left',
+                'left_date' => now(),
+                'left_reason' => $leftReason ?: null,
+                'caller_id' => null,
+                'mikrotikStatus' => false,
+            ];
+            if ($onuReturned) {
+                // f) ONU/router returned — free the hardware field
+                $update['onu_mac'] = null;
+            }
+            $customer->update($update);
+
+            return response()->json([
+                'status' => 'success',
+                'message' => 'Client marked as left successfully.',
+                'warnings' => $warnings,
+            ], 200);
+        } catch (\Exception $e) {
+            Log::error("Failed to mark client left: {$e->getMessage()}");
+            return response()->json([
+                'status' => 'error',
+                'message' => 'An error occurred while marking the client as left.',
+                'details' => $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * Restore a left client back to 'active' / 'expired' without creating a
+     * duplicate record. Re-enables the MikroTik secret when possible and
+     * clears the left-date/reason fields.
+     */
+    public function restoreLeftClient(Request $request)
+    {
+        try {
+            $id = $request->input('id');
+            $status = $request->input('status', 'active');
+            if (!in_array($status, ['active', 'expired'])) {
+                $status = 'active';
+            }
+
+            $customer = Customer::with('server')->find($id);
+            if (!$customer) {
+                return response()->json(['message' => 'Client not found.'], 404);
+            }
+            if ($customer->status !== 'left') {
+                return response()->json(['message' => 'Client is not marked as left.'], 422);
+            }
+
+            $warnings = [];
+            if ($customer->server_id && $customer->radius_id) {
+                try {
+                    $server = $customer->server ?? MikrotikServer::find($customer->server_id);
+                    if ($server) {
+                        // $client = $this->mikrotikClient($server);
+                        $client = new Client([
+                            'host' => $server->serverip,
+                            'user' => $server->Username,
+                            'pass' => $server->password,
+                            'port' => $server->port,
+                        ]);
+                        $client->connect();
+                        $enable = new Query('/ppp/secret/set');
+                        $enable->equal('.id', $customer->radius_id);
+                        $enable->equal('disabled', 'false');
+                        $client->query($enable)->read();
+                    }
+                } catch (\Exception $e) {
+                    Log::warning("MikroTik restore failed for customer {$id}: {$e->getMessage()}");
+                    $warnings[] = 'MikroTik re-enable skipped: ' . $e->getMessage();
+                }
+            }
+
+            $customer->update([
+                'status' => $status,
+                'billingstatus' => $status === 'active' ? 'Active' : ucfirst($status),
+                'left_date' => null,
+                'left_reason' => null,
+                'mikrotikStatus' => true,
+            ]);
+
+            return response()->json([
+                'status' => 'success',
+                'message' => 'Client restored successfully.',
+                'warnings' => $warnings,
+            ], 200);
+        } catch (\Exception $e) {
+            Log::error("Failed to restore left client: {$e->getMessage()}");
+            return response()->json([
+                'status' => 'error',
+                'message' => 'An error occurred while restoring the client.',
+                'details' => $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * Single endpoint for the Left Client page.
+     *
+     * GET /api/customers/left-clients?page=&per_page=&left_reason=&date_from=&date_to=
+     *
+     * - Queries ONLY customers where status = 'left'.
+     * - Accepts pagination (page, per_page) plus the structured reason/date
+     *   filters. The free-text SEARCH is deliberately NOT processed here — it
+     *   is handled 100% reactively on the frontend across all columns.
+     * - Returns a predictable payload: { status, data, current_page,
+     *   last_page, total, per_page, meta }.
+     *
+     * NOTE: eager-loading uses with('server') only. 'package' is a COLUMN on
+     * customers, not a relation — with('package') throws RelationNotFoundException.
+     */
+    public function leftClients(Request $request)
+    {
+        try {
+
+
+            $perPage = max(1, $request->integer('per_page', 25));
+
+            $query = Customer::with('server')->where('status', 'left');
+
+            // Exact reason filter (dropdown)
+            if ($reason = $request->input('left_reason')) {
+                $query->where('left_reason', $reason);
+            }
+
+            // Date range filter on left_date (calendar pickers)
+            if ($from = $request->input('date_from')) {
+                $query->whereDate('left_date', '>=', Carbon::parse($from));
+            }
+            if ($to = $request->input('date_to')) {
+                $query->whereDate('left_date', '<=', Carbon::parse($to));
+            }
+
+            $leftClients = $query->orderByDesc('left_date')->paginate($perPage);
+
+            // Aggregated metadata (counts respect the date filters too)
+            $statsQuery = Customer::where('status', 'left');
+            if ($from = $request->input('date_from')) {
+                $statsQuery->whereDate('left_date', '>=', Carbon::parse($from));
+            }
+            if ($to = $request->input('date_to')) {
+                $statsQuery->whereDate('left_date', '<=', Carbon::parse($to));
+            }
+
+            $totalLeft = $statsQuery->count();
+            $leftThisMonth = Customer::where('status', 'left')
+                ->whereBetween('left_date', [now()->startOfMonth(), now()->endOfMonth()])
+                ->count();
+
+            // Reasons breakdown mirrors the same date range as the table so the
+            // dropdown options always match the visible rows.
+            $reasonsQuery = Customer::where('status', 'left')
+                ->whereNotNull('left_reason')
+                ->where('left_reason', '!=', '');
+            if ($from = $request->input('date_from')) {
+                $reasonsQuery->whereDate('left_date', '>=', Carbon::parse($from));
+            }
+            if ($to = $request->input('date_to')) {
+                $reasonsQuery->whereDate('left_date', '<=', Carbon::parse($to));
+            }
+            $reasons = $reasonsQuery
+                ->selectRaw('left_reason, COUNT(*) as total')
+                ->groupBy('left_reason')
+                ->orderByDesc('total')
+                ->get();
+
+            return response()->json([
+                'status'       => 'success',
+                'data'         => $leftClients->items(),
+                'current_page' => $leftClients->currentPage(),
+                'last_page'    => $leftClients->lastPage(),
+                'total'        => $leftClients->total(),
+                'per_page'     => $leftClients->perPage(),
+                'meta'         => [
+                    'total_left'      => $totalLeft,
+                    'left_this_month' => $leftThisMonth,
+                    'reasons'         => $reasons,
+                ],
+            ], 200);
+        } catch (\Exception $e) {
+            // Log the REAL exception so missing columns / bad relations are visible
+            Log::error("Failed to fetch left clients: {$e->getMessage()}");
+            Log::error($e->getTraceAsString());
+
+            return response()->json([
+                'status'  => 'error',
+                'message' => 'Failed to fetch left clients.',
+                'error'   => $e->getMessage(), // surfaced for easier debugging
+            ], 500);
+        }
+    }
+
 
     public function clientlistdashboard()
     {
-        $numberofRunningClient = Customer::where('billingstatus', '!=', 'Left')->count();
+        // Count left clients via the new status column OR the legacy billingstatus.
+        $numberofRunningClient = Customer::where('billingstatus', '!=', 'Left')
+            ->where(function ($q) {
+                $q->whereNull('status')->orWhere('status', '!=', 'left');
+            })
+            ->count();
+        $numberofLeftClient = Customer::where(function ($q) {
+            $q->where('status', 'left')->orWhere('billingstatus', 'Left');
+        })->count();
         $numberofFreeClient = Customer::where('billingstatus', '=', 'Free')->count();
         $currentMonth = Carbon::now()->month;
         $currentYear = Carbon::now()->year;
@@ -132,6 +435,7 @@ class CustomerController extends Controller
             ->count();
         return response()->json([
             'RunningClient' => $numberofRunningClient,
+            'LeftClient' => $numberofLeftClient,
             'newClientsCount' => $newClientsCount,
             'numberofFreeClient' => $numberofFreeClient
         ], 200);
@@ -338,6 +642,7 @@ class CustomerController extends Controller
                 'billingstatus' => $billingstatus,
                 'notes' => $notes,
                 'executiondate' => $formattedDate,
+                'status' => 'completed', // applied immediately, never enters the pending queue
             ]);
             $customer->update([
                 'billingstatus' => $billingstatus,
@@ -398,6 +703,7 @@ class CustomerController extends Controller
                 'monthlybill' => $monthlybill,
                 'notes' => $notes,
                 'executiondate' => $formattedDate,
+                'status' => 'completed', // applied immediately, never enters the pending queue
             ]);
 
             // Prepare update data based on provided fields
@@ -455,19 +761,198 @@ class CustomerController extends Controller
         }
     }
     /**
+     * Change a customer's package — immediately (executiondate <= today) or
+     * scheduled (executiondate > today, processed by the cron command).
+     *
+     * POST /api/customers/{id}/change-package
+     * Accepts: package_id (optional), package (name), profile, monthlybill,
+     *          executiondate (YYYY-MM-DD), notes.
+     */
+    public function changePackage(Request $request, $id)
+    {
+        try {
+            $validated = $request->validate([
+                'package_id'    => 'nullable|integer',
+                'package'       => 'nullable|string|max:255',
+                'profile'       => 'required|string|max:255',
+                'monthlybill'   => 'required|numeric',
+                'executiondate' => 'required|date',
+                'notes'         => 'nullable|string|max:1000',
+            ]);
+
+            $customer = Customer::with('server')->findOrFail($id);
+
+            // Resolve the package name: prefer the explicit name, else the id.
+            $packageName = $validated['package'] ?? null;
+            if (!$packageName && !empty($validated['package_id'])) {
+                $packageName = Package::find($validated['package_id'])?->packagename;
+            }
+            $packageName = $packageName ?: $customer->package;
+
+            $executionDate = Carbon::parse($validated['executiondate'])->format('Y-m-d');
+            $today = now()->format('Y-m-d');
+            $isImmediate = $executionDate <= $today;
+
+            $record = [
+                'customer_id'     => $customer->id,
+                'old_profile'     => $customer->profile,
+                'old_monthlybill' => $customer->monthlybill,
+                'server'          => $customer->server,
+                'protocoltype'    => $customer->protocoltype,
+                'profile'         => $validated['profile'],
+                'package'         => $packageName,
+                'monthlybill'     => $validated['monthlybill'],
+                'notes'           => $validated['notes'],
+                'requested_by'    => Auth::user()?->name,
+                'executiondate'   => $executionDate,
+            ];
+
+            if ($isImmediate) {
+                // Apply now: MikroTik profile + kick session, then local update.
+                app(ScheduledChangeService::class)->applyPackageChange($customer, $validated['profile']);
+
+                $customer->update([
+                    'package'     => $packageName,
+                    'monthlybill' => $validated['monthlybill'],
+                    'profile'     => $validated['profile'],
+                ]);
+
+                $record['status'] = 'completed';
+                $message = 'Package changed successfully.';
+            } else {
+                $record['status'] = 'pending';
+                $message = 'Package change scheduled for ' . $executionDate . '.';
+            }
+
+            $packageChanged = PackageChanged::create($record);
+
+            return response()->json([
+                'status'  => 'success',
+                'message' => $message,
+                'data'    => $packageChanged,
+            ], 200);
+        } catch (\Exception $e) {
+            Log::error("Failed to change package for customer {$id}: {$e->getMessage()}");
+            return response()->json([
+                'status'  => 'error',
+                'message' => 'Failed to change the package.',
+                'error'   => $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * Change a customer's billing status — immediately or scheduled.
+     *
+     * POST /api/customers/{id}/change-status
+     * Accepts: billingstatus (active|suspended|expired|left), executiondate,
+     *          notes.
+     */
+    public function changeStatus(Request $request, $id)
+    {
+        try {
+            $validated = $request->validate([
+                'billingstatus' => 'required|in:active,suspended,expired,left',
+                'executiondate' => 'required|date',
+                'notes'         => 'nullable|string|max:1000',
+            ]);
+
+            $customer = Customer::with('server')->findOrFail($id);
+            $status = $validated['billingstatus'];
+
+            $executionDate = Carbon::parse($validated['executiondate'])->format('Y-m-d');
+            $today = now()->format('Y-m-d');
+            $isImmediate = $executionDate <= $today;
+
+            $record = [
+                'customer_id'      => $customer->id,
+                'old_billingstatus' => $customer->status ?: $customer->billingstatus,
+                'billingstatus'    => $status,
+                'notes'            => $validated['notes'],
+                'requested_by'     => Auth::user()?->name,
+                'executiondate'    => $executionDate,
+            ];
+
+            if ($isImmediate) {
+                // Apply now: enable/disable secret + kick session, then update local.
+                app(ScheduledChangeService::class)->applyStatusChange($customer, $status);
+
+                $customer->update([
+                    'status'         => $status,
+                    'billingstatus'  => ucfirst($status),
+                    'mikrotikStatus' => $status === 'active', // keeps dashboard Online/Inactive counts in sync
+                    'caller_id'      => $status === 'left' ? null : $customer->caller_id,
+                    'left_date'      => $status === 'left' ? now() : $customer->left_date,
+                    'left_reason'    => $status === 'left' ? ($validated['notes'] ?: $customer->left_reason) : $customer->left_reason,
+                ]);
+
+                $record['status'] = 'completed';
+                $message = 'Status changed successfully.';
+            } else {
+                $record['status'] = 'pending';
+                $message = 'Status change scheduled for ' . $executionDate . '.';
+            }
+
+            $statusChanged = StatusChanged::create($record);
+
+            return response()->json([
+                'status'  => 'success',
+                'message' => $message,
+                'data'    => $statusChanged,
+            ], 200);
+        } catch (\Exception $e) {
+            Log::error("Failed to change status for customer {$id}: {$e->getMessage()}");
+            return response()->json([
+                'status'  => 'error',
+                'message' => 'Failed to change the status.',
+                'error'   => $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * History of package + status change requests for one customer.
+     *
+     * GET /api/customers/{id}/changes
+     */
+    public function getCustomerChanges($id)
+    {
+        try {
+            $packageChanges = PackageChanged::where('customer_id', $id)
+                ->orderByDesc('created_at')
+                ->get();
+            $statusChanges = StatusChanged::where('customer_id', $id)
+                ->orderByDesc('created_at')
+                ->get();
+
+            return response()->json([
+                'status'         => 'success',
+                'package_changes' => $packageChanges,
+                'status_changes'  => $statusChanges,
+            ], 200);
+        } catch (\Exception $e) {
+            Log::error("Failed to fetch changes for customer {$id}: {$e->getMessage()}");
+            return response()->json([
+                'status'  => 'error',
+                'message' => 'Failed to fetch change history.',
+            ], 500);
+        }
+    }
+
+    /**
      * Relations that must be eager-loaded for each optional PDF section.
      * Only the relations required by the user-selected sections are loaded,
      * so generating a "Profile only" PDF never queries payments/bills/etc.
      */
     protected const PDF_SECTION_RELATIONS = [
-        'Profile'        => [],
-        'Service'        => [],
-        'Personal'       => [],
-        'Network'        => ['server'],
-        'ReceivedBill'   => ['payment'],
-        'ProductSell'    => [],
-        'GenerateBill'   => ['generatedBill'],
-        'Message'        => [],
+        'Profile' => [],
+        'Service' => [],
+        'Personal' => [],
+        'Network' => ['server'],
+        'ReceivedBill' => ['payment'],
+        'ProductSell' => [],
+        'GenerateBill' => ['generatedBill'],
+        'Message' => [],
         'CustomerStatus' => ['statusChanged'],
     ];
 
@@ -482,7 +967,7 @@ class CustomerController extends Controller
     public function generateClientProfilePdf(Request $request)
     {
         try {
-            $id       = (int) $request->query('id');
+            $id = (int) $request->query('id');
             $sections = $request->query('sections', []);
 
             // Normalize sections (single value or array) and drop unknown keys
@@ -494,25 +979,25 @@ class CustomerController extends Controller
 
             // Dynamically eager-load ONLY the relations used by selected sections
             $relations = collect($sections)
-                ->flatMap(fn ($key) => self::PDF_SECTION_RELATIONS[$key] ?? [])
+                ->flatMap(fn($key) => self::PDF_SECTION_RELATIONS[$key] ?? [])
                 ->unique()
                 ->values()
                 ->all();
 
             $customer = Customer::with($relations)->findOrFail($id);
-            $company  = CompanyProfile::first();
+            $company = CompanyProfile::first();
 
             $html = view('pdf.client-profile', [
-                'customer'          => $customer,
-                'company'           => $company,
-                'sections'          => $sections,
+                'customer' => $customer,
+                'company' => $company,
+                'sections' => $sections,
                 'billingStartMonth' => $this->formatMonthYear($customer->billingmonth),
                 // Direct image URLs (not base64) — mPDF fetches them at render time
-                'images'            => [
-                    'profile'      => $this->resolveImageUrl($customer->profileimage),
-                    'nid'          => $this->resolveImageUrl($customer->nidimage),
+                'images' => [
+                    'profile' => $this->resolveImageUrl($customer->profileimage),
+                    'nid' => $this->resolveImageUrl($customer->nidimage),
                     'registration' => $this->resolveImageUrl($customer->registrationimage),
-                    'company'      => $this->resolveImageUrl($company?->image),
+                    'company' => $this->resolveImageUrl($company?->image),
                 ],
             ])->render();
 
@@ -522,13 +1007,13 @@ class CustomerController extends Controller
             }
 
             $mpdf = new \Mpdf\Mpdf([
-                'mode'          => 'utf-8',
-                'format'        => 'A4',
-                'margin_left'   => 12,
-                'margin_right'  => 12,
-                'margin_top'    => 14,
+                'mode' => 'utf-8',
+                'format' => 'A4',
+                'margin_left' => 12,
+                'margin_right' => 12,
+                'margin_top' => 14,
                 'margin_bottom' => 14,
-                'tempDir'       => $tempDir,
+                'tempDir' => $tempDir,
             ]);
             $mpdf->SetTitle('Client Profile - ' . $customer->name);
             $mpdf->SetAuthor($company->title ?? config('app.name'));
@@ -538,7 +1023,7 @@ class CustomerController extends Controller
                 $mpdf->Output('ClientProfile.pdf', \Mpdf\Output\Destination::STRING_RETURN),
                 200,
                 [
-                    'Content-Type'        => 'application/pdf',
+                    'Content-Type' => 'application/pdf',
                     'Content-Disposition' => 'attachment; filename="ClientProfile.pdf"',
                 ]
             );
@@ -546,7 +1031,7 @@ class CustomerController extends Controller
             Log::error("Failed to generate client profile PDF for customer {$request->query('id')}: {$e->getMessage()}");
             return response()->json([
                 'message' => 'Failed to generate the PDF.',
-                'error'   => $e->getMessage(),
+                'error' => $e->getMessage(),
             ], 500);
         }
     }
@@ -594,7 +1079,7 @@ class CustomerController extends Controller
         return $base . (str_starts_with($image, '/') ? '' : '/') . $image;
     }
 
-    public function addMikrotikUser($mikrotikServer, $username, $password, $profile, $fullComment,   $service = 'pppoe')
+    public function addMikrotikUser($mikrotikServer, $username, $password, $profile, $fullComment, $service = 'pppoe')
     {
         try {
             $settings = SystemPermission::first();
@@ -867,8 +1352,8 @@ class CustomerController extends Controller
 
             if (empty($customer->server_id)) {
                 return response()->json([
-                    'is_online'  => false,
-                    'live_mac'   => null,
+                    'is_online' => false,
+                    'live_mac' => null,
                     'ip_address' => null,
                 ], 200);
             }
@@ -876,8 +1361,8 @@ class CustomerController extends Controller
             $server = MikrotikServer::find($customer->server_id);
             if (!$server) {
                 return response()->json([
-                    'is_online'  => false,
-                    'live_mac'   => null,
+                    'is_online' => false,
+                    'live_mac' => null,
                     'ip_address' => null,
                 ], 200);
             }
@@ -896,8 +1381,8 @@ class CustomerController extends Controller
             foreach ($responses as $item) {
                 if (($item['name'] ?? null) === $customer->username) {
                     return response()->json([
-                        'is_online'  => true,
-                        'live_mac'   => $item['caller-id'] ?? null,
+                        'is_online' => true,
+                        'live_mac' => $item['caller-id'] ?? null,
                         'ip_address' => $item['address'] ?? null,
                     ], 200);
                 }
@@ -905,16 +1390,16 @@ class CustomerController extends Controller
 
             // Username not present in active sessions
             return response()->json([
-                'is_online'  => false,
-                'live_mac'   => null,
+                'is_online' => false,
+                'live_mac' => null,
                 'ip_address' => null,
             ], 200);
         } catch (\Exception $e) {
             // Router unreachable/query failed — never break the UI, report offline
             Log::error("Failed to check live MAC for customer {$id}: {$e->getMessage()}");
             return response()->json([
-                'is_online'  => false,
-                'live_mac'   => null,
+                'is_online' => false,
+                'live_mac' => null,
                 'ip_address' => null,
             ], 200);
         }
@@ -966,7 +1451,7 @@ class CustomerController extends Controller
             ]);
 
             return response()->json([
-                'message'   => 'MAC address bound successfully.',
+                'message' => 'MAC address bound successfully.',
                 'caller_id' => $mac_address
             ], 200);
         } catch (\Exception $e) {
@@ -1017,7 +1502,7 @@ class CustomerController extends Controller
             ]);
 
             return response()->json([
-                'message'   => 'MAC address unbound successfully.',
+                'message' => 'MAC address unbound successfully.',
                 'caller_id' => null
             ], 200);
         } catch (\Exception $e) {
@@ -1036,7 +1521,7 @@ class CustomerController extends Controller
                 return response()->json(['message' => 'No users selected.'], 422);
             }
 
-            $bound  = 0;
+            $bound = 0;
             $failed = 0;
             foreach ($users as $user) {
                 // Per-user try/catch so one bad router/user never aborts the whole batch
@@ -1054,7 +1539,7 @@ class CustomerController extends Controller
                     }
 
                     $mac_address = trim((string) ($user['mac_address'] ?? ''));
-                    $radius_id   = $user['radius_id'] ?? $customer->radius_id;
+                    $radius_id = $user['radius_id'] ?? $customer->radius_id;
                     if ($mac_address === '' || empty($radius_id)) {
                         $failed++;
                         continue;
@@ -1091,8 +1576,8 @@ class CustomerController extends Controller
 
             return response()->json([
                 'message' => $message,
-                'bound'   => $bound,
-                'failed'  => $failed
+                'bound' => $bound,
+                'failed' => $failed
             ], 200);
         } catch (\Exception $e) {
             Log::error("Failed to bind selected MAC addresses: {$e->getMessage()}");
@@ -1110,7 +1595,7 @@ class CustomerController extends Controller
             }
 
             $unbound = 0;
-            $failed  = 0;
+            $failed = 0;
             foreach ($users as $user) {
                 // Per-user try/catch so one bad router/user never aborts the whole batch
                 try {
@@ -1164,7 +1649,7 @@ class CustomerController extends Controller
             return response()->json([
                 'message' => $message,
                 'unbound' => $unbound,
-                'failed'  => $failed
+                'failed' => $failed
             ], 200);
         } catch (\Exception $e) {
             Log::error("Failed to unbind selected MAC addresses: {$e->getMessage()}");

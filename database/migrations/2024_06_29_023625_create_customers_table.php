@@ -72,13 +72,18 @@ return new class extends Migration
             $table->string('referenceby')->nullable();
             $table->string('connectedby')->nullable();
             // $table->string('caller-id')->nullable();
+            $table->timestamp('left_date')->nullable();
+            $table->string('left_reason')->nullable();
+            $table->string('onu_mac', 64)->nullable();
             $table->string('con_charge')->nullable();
             $table->string('joiningdate')->nullable();
             $table->string('billingmonth')->nullable();
+            $table->decimal('previous_due',10,2)->default(0.00);
+
             $table->string('billingstatus')->nullable();
             $table->decimal('monthlybill', 8, 2)->nullable();
             $table->boolean('mikrotikStatus')->default(true);
-
+            $table->enum('status', ['active', 'expired', 'suspended', 'left'])->default('active')->nullable();
             $table->timestamps();
         });
     }

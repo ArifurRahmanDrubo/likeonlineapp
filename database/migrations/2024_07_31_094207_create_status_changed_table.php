@@ -17,6 +17,9 @@ return new class extends Migration
             $table->string('billingstatus'); // Add your desired field type and constraints
             $table->text('notes')->nullable(); // Allow null values
             $table->string('executiondate');
+            $table->string('old_billingstatus')->nullable()->after('customer_id');
+            $table->enum('status', ['pending', 'completed', 'failed', 'cancelled'])->default('pending')->after('executiondate');
+            $table->text('error_log')->nullable()->after('status');
             $table->foreign('customer_id')->references('id')->on('customers')->onDelete('cascade'); // Date type for execution date
             $table->timestamps();
         });

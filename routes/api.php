@@ -22,6 +22,7 @@ use App\Http\Controllers\ProductController;
 use App\Http\Controllers\SubZoneController;
 use App\Http\Controllers\AccountsController;
 use App\Http\Controllers\CategoryController;
+use App\Http\Controllers\ChangeRequestController;
 use App\Http\Controllers\CustomerController;
 use App\Http\Controllers\DistrictController;
 use App\Http\Controllers\EmployeeController;
@@ -250,7 +251,10 @@ Route::middleware(['auth:sanctum'])->group(function () {
 
     //New Customer
     Route::post('create-customer', [CustomerController::class, 'store']);
-    Route::post('delete-customer', [HelloController::class, 'DeleteClient']);
+    Route::post('delete-customer', [CustomerController::class, 'makeClientLeft']);
+    Route::post('make-client-left', [CustomerController::class, 'makeClientLeft'])->middleware('permission:left_client,write');
+    Route::post('restore-left-client', [CustomerController::class, 'restoreLeftClient'])->middleware('permission:left_client,write');
+    Route::get('customers/left-clients', [CustomerController::class, 'leftClients']);
     Route::get('billingLists', [CustomerController::class, 'index']);
     Route::get('clientProfileData', [CustomerController::class, 'clientData']);
     Route::get('clientList', [HelloController::class, 'clientList']);
@@ -264,6 +268,18 @@ Route::middleware(['auth:sanctum'])->group(function () {
     Route::get('get-client/{id}', [CustomerController::class, 'getClient']);
     Route::post('update-clientbillingstatus', [CustomerController::class, 'updateclientbillingstatus']);
     Route::post('update-packageStatus', [CustomerController::class, 'updatepPackageStatus']);
+    Route::post('customers/{id}/change-package', [CustomerController::class, 'changePackage']);
+    Route::post('customers/{id}/change-status', [CustomerController::class, 'changeStatus']);
+    Route::get('customers/{id}/changes', [CustomerController::class, 'getCustomerChanges']);
+
+    // Change requests (approve/reject/edit date) + scheduler (queue/force-run/retry)
+    Route::get('change-requests', [ChangeRequestController::class, 'index'])->middleware('permission:change_request,read');
+    Route::post('change-requests/{id}/approve', [ChangeRequestController::class, 'approve'])->middleware('permission:change_request,write');
+    Route::post('change-requests/{id}/reject', [ChangeRequestController::class, 'reject'])->middleware('permission:change_request,write');
+    Route::post('change-requests/{id}/update-date', [ChangeRequestController::class, 'updateDate'])->middleware('permission:change_request,write');
+    Route::get('scheduler', [ChangeRequestController::class, 'schedulerIndex'])->middleware('permission:scheduler,read');
+    Route::post('scheduler/{id}/force-run', [ChangeRequestController::class, 'forceRun'])->middleware('permission:scheduler,write');
+    Route::post('scheduler/{id}/retry', [ChangeRequestController::class, 'retry'])->middleware('permission:scheduler,write');
     // Backend PDF generation (mPDF): only the sections passed via sections[] are rendered
     Route::get('get-client-pdf', [CustomerController::class, 'generateClientProfilePdf']);
 

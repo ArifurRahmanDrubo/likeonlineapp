@@ -36,7 +36,12 @@ public function clientList(Request $request)
         $perPage = max(1, $request->integer('per_page', 25));
 
         // Standard Laravel pagination JSON: data, current_page, last_page, total, per_page.
-        return Customer::paginate($perPage);
+        // Left clients are managed on the dedicated Left Client page, so they
+        // are excluded here. NULL-safe: legacy customers without a status are
+        // still shown.
+        return Customer::where(function ($q) {
+            $q->whereNull('status')->orWhere('status', '!=', 'left');
+        })->paginate($perPage);
     } catch (\Exception $e) {
         Log::error("Failed to fetch client list: {$e->getMessage()}");
 
@@ -73,30 +78,6 @@ public function clientList(Request $request)
     //         throw new \Exception("Failed to fetch users from Mikrotik Server");
     //     }
     // }
-    public function DeleteClient(Request $request)
-    {
-        try {
-
-            $clientId = $request->input('id');
-            $customer = Customer::find($clientId);
-            if ($customer) {
-                // Delete associated images from Cloudinary before deleting the record
-                foreach (['profileimage', 'nidimage', 'registrationimage'] as $field) {
-                    if ($customer->{$field . '_public_id'}) {
-                        cloudinary_delete($customer->{$field . '_public_id'});
-                    }
-                }
-                $customer->delete();
-            }
-            return response()->json([
-                'message' => 'Client Deleted Succefully'
-            ], 200);
-        } catch (\Exception $e) {
-            return response()->json([
-                'message' => $e->getMessage()
-            ], 500);
-        }
-    }
     public function DeleteEmployee(Request $request)
     {
         try {

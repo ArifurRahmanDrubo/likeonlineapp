@@ -21,6 +21,10 @@ return new class extends Migration
             $table->decimal('monthlybill', 10, 2); // Monthly bill with precision for currency
             $table->text('notes')->nullable(); // Notes can be nullable
             $table->string('executiondate');
+            $table->string('old_profile')->nullable()->after('customer_id');
+            $table->decimal('old_monthlybill', 10, 2)->nullable()->after('old_profile');
+            $table->enum('status', ['pending', 'completed', 'failed', 'cancelled'])->default('pending')->after('executiondate');
+            $table->text('error_log')->nullable()->after('status');
             $table->foreign('customer_id')->references('id')->on('customers')->onDelete('cascade');
             $table->timestamps(); // Created_at and updated_at timestamps
         });

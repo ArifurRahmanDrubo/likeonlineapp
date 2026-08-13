@@ -41,8 +41,14 @@ class DisableExpiredCustomers extends Command
             return; // Exit if the permission is disabled
         }
 
-        // Fetch customers with unpaid invoices whose expiration date is past
+        // Fetch customers with unpaid invoices whose expiration date is past.
+        // Left clients are skipped — they are already disconnected and must
+        // not be re-disabled or re-processed. NULL-safe: legacy customers
+        // without a status still qualify.
         $customers = Customer::where('expireddate', '<', $currentDate)
+            ->where(function ($q) {
+                $q->whereNull('status')->orWhere('status', '!=', 'left');
+            })
             ->whereHas('invoice', function ($query) {
                 $query->where('status', 'unpaid'); // filter unpaid invoices
             })

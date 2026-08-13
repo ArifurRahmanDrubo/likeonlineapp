@@ -19,7 +19,12 @@ class GenerateMonthlyInvoices extends Command
         try {
 
 
-            $customers = Customer::all();
+            // Never generate invoices for Left clients. NULL-safe: customers
+            // that predate the status column (status IS NULL) must still be
+            // billed, only status = 'left' is excluded.
+            $customers = Customer::where(function ($q) {
+                $q->whereNull('status')->orWhere('status', '!=', 'left');
+            })->get();
             $currentMonth = Carbon::now()->format('Y-m'); // Current month in 'YYYY-MM' format
 
             foreach ($customers as $customer) {
