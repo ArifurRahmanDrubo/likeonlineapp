@@ -338,21 +338,23 @@ Route::middleware(['auth:sanctum'])->group(function () {
 
 
     // Route::post('create-payment', [HelloController::class, 'store']);
-    Route::post('create-payment', [InvoiceController::class, 'store']);
+    // Payment execution endpoints are guarded with the same permission scheme
+    // as the rest of the ISP Billing module (frontend gates on the same names).
+    Route::post('create-payment', [InvoiceController::class, 'store'])->middleware('permission:daily_bill_collection,write');
     Route::post('create-payslip', [PayrollController::class, 'store']);
     Route::get('get-payslip', [PayrollController::class, 'index']);
     Route::get('get-detailspayslip', [PayrollController::class, 'detailspayslip']);
 
-    Route::get('/payments/pending', [InvoiceController::class, 'pendingPayments']);
-    Route::post('/payment/approve/{id}', [InvoiceController::class, 'approvePayment']);
-    Route::post('/payment/reject/{id}', [InvoiceController::class, 'rejectPayment']);
+    Route::get('/payments/pending', [InvoiceController::class, 'pendingPayments'])->middleware('permission:payments,read');
+    Route::post('/payment/approve/{id}', [InvoiceController::class, 'approvePayment'])->middleware('permission:payments,write');
+    Route::post('/payment/reject/{id}', [InvoiceController::class, 'rejectPayment'])->middleware('permission:payments,write');
 
     Route::get('get-payment', [InvoiceController::class, 'index']);
 
     Route::get('get-detailsinvoice', [InvoiceController::class, 'detailsinvoice']);
     Route::get('get-detailsGenerateBill', [InvoiceController::class, 'GenerateBillData']);
     Route::get('get-paymentData', [InvoiceController::class, 'paymentData']);
-    Route::post('delete-paymentData', [InvoiceController::class, 'deletePaymentData']);
+    Route::post('delete-paymentData', [InvoiceController::class, 'deletePaymentData'])->middleware('permission:recieved_bill_history_cancel,write');
 
     //CompanyProfile
     Route::get('/company-profile', [CompanyProfileController::class, 'index']);

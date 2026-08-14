@@ -90,6 +90,7 @@ class DashboardController extends Controller
         // Get the first and current date of the current month
         $startOfMonth = Carbon::now()->startOfMonth();
         $currentDate = Carbon::now();
+        $currentMonth = Carbon::now()->format('Y-m');
 
         // Count paid clients (customers with 'paid' invoices for the current month)
         $paidClient = Customer::whereHas('invoice', function ($query) use ($startOfMonth, $currentDate) {
@@ -97,9 +98,9 @@ class DashboardController extends Controller
                 ->whereBetween('created_at', [$startOfMonth, $currentDate]); // Filter by current month
         })->count();
 
-        // Count unpaid clients (customers with 'unpaid' invoices for the current month)
+        // Count unpaid clients (customers with 'unpaid' or 'partial' invoices for the current month)
         $unpaidClient = Customer::whereHas('invoice', function ($query) use ($startOfMonth, $currentDate) {
-            $query->where('status', '=', 'unpaid')
+            $query->whereIn('status', ['unpaid', 'partial'])
                 ->whereBetween('created_at', [$startOfMonth, $currentDate]); // Filter by current month
         })->count();
 
@@ -108,9 +109,8 @@ class DashboardController extends Controller
             ->whereBetween('created_at', [$startOfMonth, $currentDate])
             ->sum('received_amount');
 
-        // Total due amount for invoices created in the current month
-        $due_amount = Invoice::whereHas('customer')
-            ->whereBetween('created_at', [$startOfMonth, $currentDate])
+        // Total outstanding due — all unpaid/partial invoices, no date filters
+        $due_amount = Invoice::whereIn('status', ['unpaid', 'partial'])
             ->sum('amount');
 
         // Total advance payments for invoices created in the current month
@@ -123,9 +123,8 @@ class DashboardController extends Controller
             ->whereBetween('created_at', [$startOfMonth, $currentDate])
             ->sum('discount');
 
-        // Total generated bills for customers in the current month
-        $generated_bill = GeneratedBill::whereHas('customer')
-            ->whereBetween('created_at', [$startOfMonth, $currentDate])
+        // Total monthly generated bill — snapshot rows for the current billing month
+        $generated_bill = GeneratedBill::where('billing_month', $currentMonth)
             ->sum('amount');
 
         // Total salary paid in the current month

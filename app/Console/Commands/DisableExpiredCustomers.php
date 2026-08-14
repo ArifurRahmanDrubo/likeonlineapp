@@ -50,7 +50,7 @@ class DisableExpiredCustomers extends Command
                 $q->whereNull('status')->orWhere('status', '!=', 'left');
             })
             ->whereHas('invoice', function ($query) {
-                $query->where('status', 'unpaid'); // filter unpaid invoices
+                $query->whereIn('status', ['unpaid', 'partial']); // filter unpaid/partial invoices
             })
             ->get();
 

@@ -36,9 +36,9 @@ class ReportController extends Controller
             ]);
             $todate = $request->input('toDate');
 
-            $toDate = Carbon::parse($todate)->format('d F Y');
-            $fromdate = $request->input('fromDate');
-            $fromDate = Carbon::parse($fromdate)->format('d F Y');
+            // recieved_date is stored as Y-m-d — always compare against Y-m-d strings.
+            $toDate = $request->filled('toDate') ? Carbon::parse($request->input('toDate'))->format('Y-m-d') : null;
+            $fromDate = $request->filled('fromDate') ? Carbon::parse($request->input('fromDate'))->format('Y-m-d') : null;
 
             // Build query
             $query = Payment::with('customer.invoice');
@@ -56,16 +56,29 @@ class ReportController extends Controller
                 $query->where('recieved_by', $request->input('recieved_by'));
             }
             if ($request->filled('created_by')) {
-                $query->where('created_by', $request->input('created_by'));
+                // Match both new rows (integer user ID) and legacy rows (user name string).
+                $createdBy = $this->createdByFilter($request->input('created_by'));
+                $query->where(function ($q) use ($createdBy) {
+                    $q->whereIn('created_by', $createdBy['userIds']);
+                    if ($createdBy['rawInput'] !== null && $createdBy['rawInput'] !== '') {
+                        $q->orWhere('created_by', $createdBy['rawInput']);
+                    }
+                });
             }
             if ($request->filled('payment_method')) {
                 $query->where('payment_method', $request->input('payment_method'));
             }
+            // zone/package live on the customers table, not on payments —
+            // filter through the customer relation instead of direct columns.
             if ($request->filled('zone')) {
-                $query->where('zone', $request->input('zone'));
+                $query->whereHas('customer', function ($q) use ($request) {
+                    $q->where('zone', $request->input('zone'));
+                });
             }
             if ($request->filled('package')) {
-                $query->where('package', $request->input('package'));
+                $query->whereHas('customer', function ($q) use ($request) {
+                    $q->where('package', $request->input('package'));
+                });
             }
 
             // Execute query and get results
@@ -92,9 +105,9 @@ class ReportController extends Controller
             ]);
 
             $todate = $request->input('toDate');
-            $toDate = Carbon::parse($todate)->format('d F Y');
-            $fromdate = $request->input('fromDate');
-            $fromDate = Carbon::parse($fromdate)->format('d F Y');
+            // recieved_date is stored as Y-m-d — always compare against Y-m-d strings.
+            $toDate = $request->filled('toDate') ? Carbon::parse($request->input('toDate'))->format('Y-m-d') : null;
+            $fromDate = $request->filled('fromDate') ? Carbon::parse($request->input('fromDate'))->format('Y-m-d') : null;
 
             // Build query
             $query = Payment::with('customer.invoice');
@@ -112,7 +125,14 @@ class ReportController extends Controller
                 $query->where('recieved_by', $request->input('recieved_by'));
             }
             if ($request->filled('created_by')) {
-                $query->where('created_by', $request->input('created_by'));
+                // Match both new rows (integer user ID) and legacy rows (user name string).
+                $createdBy = $this->createdByFilter($request->input('created_by'));
+                $query->where(function ($q) use ($createdBy) {
+                    $q->whereIn('created_by', $createdBy['userIds']);
+                    if ($createdBy['rawInput'] !== null && $createdBy['rawInput'] !== '') {
+                        $q->orWhere('created_by', $createdBy['rawInput']);
+                    }
+                });
             }
 
             // Filter payments with a discount value

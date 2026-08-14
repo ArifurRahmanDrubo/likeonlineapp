@@ -170,6 +170,34 @@ class ScheduledChangeService
     }
 
     /**
+     * Re-enable a paid-up customer's PPPoE secret and kick any active session
+     * so the re-enabled state takes effect immediately.
+     *
+     * Used by payment approval to restore service once the invoice is fully
+     * paid (a) enable the secret, b) kick the live session).
+     *
+     * @throws \Exception when the router rejects the operation — the caller
+     *                   decides whether to flag the invoice as pending sync
+     */
+    public function reEnableMikrotik(Customer $customer): void
+    {
+        $client = $this->clientFor($customer);
+        if (!$client) {
+            Log::warning("No MikroTik server/radius for customer {$customer->id} — re-enable skipped.");
+            return;
+        }
+
+        // a) Enable the secret
+        $setEnabled = new Query('/ppp/secret/set');
+        $setEnabled->equal('.id', $customer->radius_id);
+        $setEnabled->equal('disabled', 'false');
+        $client->query($setEnabled)->read();
+
+        // b) Kick any active session so the re-enabled state applies immediately
+        $this->kickActiveSession($client, $customer->username);
+    }
+
+    /**
      * Remove any live /ppp/active session matching the customer's username.
      */
     protected function kickActiveSession(Client $client, string $username): void

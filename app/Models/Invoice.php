@@ -17,4 +17,14 @@ class Invoice extends Model
     {
         return $this->belongsTo(Customer::class);
     }
+
+    /**
+     * Payments received for this invoice's customer.
+     * Both tables carry customer_id, so payments can be reached directly
+     * from the invoice without an extra belongsTo hop.
+     */
+    public function payments()
+    {
+        return $this->hasMany(Payment::class, 'customer_id', 'customer_id');
+    }
 }

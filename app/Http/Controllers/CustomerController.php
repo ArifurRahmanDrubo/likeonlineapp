@@ -38,10 +38,72 @@ use RouterOS\Query;
 class CustomerController extends Controller
 {
 
-    public function index()
+    /**
+     * Billing list endpoint. Accepts optional dropdown filters:
+     *   package_id / package  — packages.id or the package name column value
+     *   zone_id / zone        — zones.id or the zone name column value
+     *   router_id / router    — mikrotikservers.id (customers.server_id) or the server name
+     *   status                — customer account status (status or billingstatus)
+     * Customers keep their string-valued package/zone columns, so ID filters
+     * are resolved to their names before querying.
+     */
+    public function index(Request $request)
     {
         try {
-            $customers = Customer::with('invoice')->get();
+            $query = Customer::with(['invoice.payments' => function ($q) {
+                $q->where('approval_status', 'approved');
+            }]);
+
+            if ($request->filled('package_id')) {
+                $packageId = $request->input('package_id');
+                if (is_numeric($packageId)) {
+                    $packageName = Package::find($packageId)?->packagename;
+                    if ($packageName) {
+                        $query->where('package', $packageName);
+                    }
+                } else {
+                    $query->where('package', $packageId);
+                }
+            }
+
+            if ($request->filled('zone_id')) {
+                $zoneId = $request->input('zone_id');
+                if (is_numeric($zoneId)) {
+                    $zoneName = Zone::find($zoneId)?->zone_name;
+                    if ($zoneName) {
+                        $query->where('zone', $zoneName);
+                    }
+                } else {
+                    $query->where('zone', $zoneId);
+                }
+            }
+
+            if ($request->filled('router_id')) {
+                $routerId = $request->input('router_id');
+                if (is_numeric($routerId)) {
+                    $query->where('server_id', $routerId);
+                } else {
+                    $query->where('server', $routerId);
+                }
+            }
+
+            if ($request->filled('status')) {
+                $status = $request->input('status');
+                $query->where(function ($q) use ($status) {
+                    $q->where('status', $status)->orWhere('billingstatus', $status);
+                });
+            }
+
+            // Eager-load payments (via invoice.payments) so each customer exposes
+            // the latest approved payment date for the billing list "Payment Date"
+            // column. previous_due is a direct customers column and ships with the
+            // customer record automatically.
+            $customers = $query->get()->map(function ($customer) {
+                $payments = $customer->invoice?->payments ?? collect();
+                $latest = $payments->sortByDesc('recieved_date')->first();
+                $customer->setAttribute('last_payment_date', $latest?->recieved_date);
+                return $customer;
+            });
             return response()->json([
                 'customers' => $customers
             ], 200);
@@ -132,6 +194,42 @@ class CustomerController extends Controller
             'pass' => $server->password,
             'port' => $server->port,
         ]);
+    }
+
+    /**
+     * Compute the amount to bill a customer for a given target month: the
+     * full monthly rate, or a pro-rata amount when the customer joined
+     * mid-month within that month.
+     *
+     * Example: joining on Aug 16 with a 1000 Tk package in a 31-day month:
+     *   remainingDays = (31 - 16) + 1 = 16
+     *   billAmount    = round((1000 / 31) * 16, 2) = 516.13
+     *
+     * Joining on the 1st (or in a past month) bills the full monthly rate.
+     */
+    protected function billAmountForMonth($joiningDate, $monthlyBill, $targetMonth = null)
+    {
+        $monthlyBill = (float) $monthlyBill;
+        $targetMonth = $targetMonth ?: Carbon::now()->format('Y-m');
+
+        $joiningDateStr = $joiningDate ?: now()->toDateString();
+        $convertedDateString = preg_replace('/ \([^\)]+\)$/', '', (string) $joiningDateStr);
+
+        try {
+            $carbonDate = Carbon::parse($convertedDateString);
+        } catch (\Throwable $e) {
+            // Unparseable joining date — fall back to the full monthly rate.
+            return $monthlyBill;
+        }
+
+        // Only the joining month is pro-rated; later months bill in full.
+        if ($carbonDate->format('Y-m') === $targetMonth && $carbonDate->day > 1) {
+            $totalDaysInMonth = $carbonDate->daysInMonth;
+            $remainingDays = ($totalDaysInMonth - $carbonDate->day) + 1;
+            return round(($monthlyBill / $totalDaysInMonth) * $remainingDays, 2);
+        }
+
+        return $monthlyBill;
     }
 
     /**
@@ -446,15 +544,17 @@ class CustomerController extends Controller
             $query->where('status', '=', 'paid'); // Adjust this field based on your actual invoice status column
         })->count();
         $unpaidClient = Customer::whereHas('invoice', function ($query) {
-            $query->where('status', '=', 'unpaid'); // Adjust this field based on your actual invoice status column
+            $query->whereIn('status', ['unpaid', 'partial']); // Adjust this field based on your actual invoice status column
         })->count();
         $received_amount = Invoice::whereHas('customer')
             ->sum('received_amount');
-        $due_amount = Invoice::whereHas('customer')
+        // Total outstanding due — all unpaid/partial invoices, no date filters
+        $due_amount = Invoice::whereIn('status', ['unpaid', 'partial'])
             ->sum('amount');
         $advance_amount = Invoice::whereHas('customer')
             ->sum('advance');
-        $generated_bill = GeneratedBill::whereHas('customer')
+        // Total monthly generated bill — snapshot rows for the current billing month
+        $generated_bill = GeneratedBill::where('billing_month', Carbon::now()->format('Y-m'))
             ->sum('amount');
         return response()->json([
             'paidClient' => $paidClient,
@@ -462,8 +562,20 @@ class CustomerController extends Controller
             'received_amount' => $received_amount,
             'due_amount' => $due_amount,
             'generated_bill' => $generated_bill,
-            'advance_amount ' => $advance_amount
-
+            'advance_amount' => $advance_amount,
+            // Lookup collections for the Billing List filter dropdowns — shipped
+            // in this single response so the page no longer fires the separate
+            // get-zones / get-package / get-customer-billingstatus /
+            // get-mikrotikserver requests on mount. The standalone endpoints
+            // remain untouched for backward compatibility. (Mikrotik servers are
+            // read with a lightweight select — the standalone endpoint pings
+            // every router, which the filter dropdown does not need.)
+            'filters' => [
+                'zones' => Zone::select('id', 'zone_name')->orderBy('zone_name')->get(),
+                'packages' => Package::select('id', 'packagename')->orderBy('packagename')->get(),
+                'billing_statuses' => CustomerBillingStatus::select('id', 'billingstatus')->orderBy('billingstatus')->get(),
+                'mikrotik_servers' => MikrotikServer::select('id', 'serverName')->orderBy('serverName')->get(),
+            ],
         ], 200);
     }
 
@@ -520,7 +632,11 @@ class CustomerController extends Controller
                 'billingmonth' => 'required|string|max:255',
                 'billingstatus' => 'required|string|max:255',
                 'monthlybill' => 'required|numeric',
+                'previous_due' => 'nullable|numeric',
             ]);
+            // Normalize previous_due: permanent reference on the customer record
+            // (defaults to 0.00 when the client form does not send it).
+            $validated['previous_due'] = $request->filled('previous_due') ? (float) $request->input('previous_due') : 0;
             // Upload images to Cloudinary (update replaces the old image, create uploads new)
             $existingCustomer = $request->input('id') ? Customer::find($request->input('id')) : null;
             foreach (['profileimage', 'nidimage', 'registrationimage'] as $field) {
@@ -605,17 +721,198 @@ class CustomerController extends Controller
 
 
 
+                // Delta adjustment: reflect a previous_due change on the
+                // customer's existing invoice.
+                $oldPreviousDue = (float) ($customer->previous_due ?? 0);
+                $newPreviousDue = (float) ($validated['previous_due'] ?? $oldPreviousDue);
+                $delta = $newPreviousDue - $oldPreviousDue;
+
                 $customer->update($validated);
+
+                if ($delta != 0) {
+                    $invoice = $customer->invoice;
+                    if ($invoice) {
+                        $invoice->amount += $delta;
+                        $invoice->status = $invoice->amount <= 0 ? 'paid' : 'unpaid';
+                        $invoice->save();
+                    }
+                }
+
+                // Keep the current month's generated bill in sync with the
+                // updated package / monthly bill — but only when the customer's
+                // billing applies to the CURRENT month, and only while it is
+                // still unpaid (never rewrite an already-paid bill snapshot).
+                $currentMonth = Carbon::now()->format('Y-m');
+                $dateString = $validated['billingmonth'] ?? $customer->billingmonth;
+                $convertedDateString = preg_replace('/ \([^\)]+\)$/', '', $dateString);
+                $billingMonth = Carbon::parse($convertedDateString)->format('Y-m');
+
+                if ($billingMonth === $currentMonth) {
+                    $generatedBill = GeneratedBill::where('customer_id', $customer->id)
+                        ->where('billing_month', $currentMonth)
+                        ->first();
+
+                    $newMonthlyBill = (float) ($validated['monthlybill'] ?? $customer->monthlybill);
+
+                    if ($generatedBill && $generatedBill->status === 'unpaid') {
+                        // Recompute the current month's bill amount — pro-rata
+                        // when the customer joined mid-month this month, full
+                        // rate otherwise. Never overwrite the pro-rated snapshot
+                        // with the raw monthly rate.
+                        $billAmount = $this->billAmountForMonth($customer->joiningdate, $newMonthlyBill, $currentMonth);
+                        $billDelta = $billAmount - (float) $generatedBill->amount;
+
+                        $generatedBill->update([
+                            'package' => $validated['package'] ?? $customer->package,
+                            'speed' => $validated['profile'] ?? $customer->profile,
+                            'amount' => $billAmount,
+                        ]);
+
+                        // Adjust the current month's unpaid invoice by the bill
+                        // delta so the balance reflects the new amount.
+                        if ($billDelta != 0) {
+                            $invoice = $customer->invoice;
+                            if ($invoice && $invoice->status === 'unpaid') {
+                                $invoice->amount += $billDelta;
+                                $invoice->status = $invoice->amount <= 0 ? 'paid' : 'unpaid';
+                                $invoice->save();
+                            }
+                        }
+                    } elseif (!$generatedBill) {
+                        // Billing starts in the current month but no generated
+                        // bill exists yet (e.g. the billing date was edited from
+                        // a past/future month) — snapshot the bill now using the
+                        // same pro-rata amount as customer creation.
+                        $billAmount = $this->billAmountForMonth($customer->joiningdate, $newMonthlyBill, $currentMonth);
+
+                        GeneratedBill::create([
+                            'customer_id' => $customer->id,
+                            'billing_month' => $currentMonth,
+                            'package' => $validated['package'] ?? $customer->package,
+                            'speed' => $validated['profile'] ?? $customer->profile,
+                            'amount' => $billAmount,
+                            'status' => 'unpaid',
+                            'generated_at' => Carbon::now()->format('d F Y'),
+                        ]);
+
+                        // Invoice sync: this is the customer's first bill for the
+                        // current month, so the invoice should total the bill
+                        // amount plus the previous due on the customer.
+                        $newPreviousDue = (float) ($validated['previous_due'] ?? $customer->previous_due ?? 0);
+                        $invoiceAmount = $billAmount + $newPreviousDue;
+
+                        $invoice = $customer->invoice;
+                        if ($invoice) {
+                            $invoice->update([
+                                'amount' => $invoiceAmount,
+                                'status' => $invoiceAmount <= 0 ? 'paid' : 'unpaid',
+                                'billing_month' => $currentMonth,
+                            ]);
+                        } else {
+                            Invoice::create([
+                                'customer_id' => $customer->id,
+                                'amount' => $invoiceAmount,
+                                'status' => $invoiceAmount <= 0 ? 'paid' : 'unpaid',
+                                'billing_month' => $currentMonth,
+                                'advance' => 0,
+                            ]);
+                        }
+                    }
+                } elseif ($billingMonth > $currentMonth) {
+                    // Billing moved OUT of the current month into a future
+                    // month — the customer should no longer be billed for the
+                    // current month. Remove the current month's unpaid bill
+                    // snapshot and un-bill the invoice accordingly.
+                    $generatedBill = GeneratedBill::where('customer_id', $customer->id)
+                        ->where('billing_month', $currentMonth)
+                        ->where('status', 'unpaid')
+                        ->first();
+
+                    if ($generatedBill) {
+                        $billAmount = (float) $generatedBill->amount;
+                        $generatedBill->delete();
+
+                        // Subtract the previously billed current-month amount
+                        // from the customer's unpaid current-month invoice so
+                        // they are not billed for this month. If nothing (or
+                        // only previous due) remains, mark it paid accordingly.
+                        $invoice = $customer->invoice;
+                        if ($invoice && $invoice->billing_month === $currentMonth && $invoice->status === 'unpaid') {
+                            $invoice->amount -= $billAmount;
+                            $invoice->status = $invoice->amount <= 0 ? 'paid' : 'unpaid';
+                            $invoice->billing_month = $billingMonth;
+                            $invoice->save();
+                        }
+                    }
+                }
+
                 return response()->json(['message' => 'Client updated successfully']);
             } else {
                 // Customer::create($validated);
                 if ($radius_id) {
-                    Customer::create($validated);
+                    $customer = Customer::create($validated);
                 } else {
                     $mikrotikServer = MikrotikServer::findOrFail($serverId);
                     $mikrotikClienCreate = $this->addMikrotikUser($mikrotikServer, $username, $password, $profile, $fullComment);
                     $validated['radius_id'] = $mikrotikClienCreate;
-                    Customer::create($validated);
+                    $customer = Customer::create($validated);
+                }
+
+                // First-month billing: compare the customer's billing month
+                // against the current month ('YYYY-MM'). The joining / start
+                // date is sent by the frontend as 'joiningdate' — accept
+                // alternate keys defensively and fall back to today.
+                $dateString = $validated['billingmonth'];
+                $convertedDateString = preg_replace('/ \([^\)]+\)$/', '', $dateString);
+                $billingMonth = Carbon::parse($convertedDateString)->format('Y-m');
+                $currentMonth = Carbon::now()->format('Y-m');
+                $monthlybill = (float) ($validated['monthlybill'] ?? $request->input('bill_amount') ?? $request->input('monthly_bill') ?? 0);
+
+                $joiningDateStr = $request->input('joiningdate')
+                    ?? $request->input('joining_date')
+                    ?? $request->input('start_date')
+                    ?? $request->input('billing_start_date')
+                    ?? now()->toDateString();
+
+                if ($billingMonth === $currentMonth) {
+                    // Pro-rata: bill only for the remaining days of the current
+                    // month, measured from the joining date.
+                    $firstMonthBill = $this->billAmountForMonth($joiningDateStr, $monthlybill, $currentMonth);
+                } elseif ($billingMonth > $currentMonth) {
+                    // Connection starts in a future month — nothing due yet.
+                    $firstMonthBill = 0;
+                } else {
+                    // Billing month already passed — the full monthly bill is due.
+                    $firstMonthBill = $monthlybill;
+                }
+
+                $previousDue = (float) ($validated['previous_due'] ?? 0);
+                $amount = $firstMonthBill + $previousDue;
+
+                // Initial invoice for the customer.
+                Invoice::create([
+                    'customer_id' => $customer->id,
+                    'amount' => $amount,
+                    'status' => $amount <= 0 ? 'paid' : 'unpaid',
+                    'billing_month' => $billingMonth,
+                    'advance' => 0,
+                ]);
+
+                // When billing starts in the CURRENT month, also snapshot the
+                // opening bill in generated_bills so the current month's bill
+                // shows up in reports alongside the invoice. The amount is the
+                // pro-rata monthly amount only — previous_due stays on the
+                // invoice / customer record, matching the monthly invoice command.
+                if ($billingMonth === $currentMonth) {
+                    GeneratedBill::create([
+                        'customer_id' => $customer->id,
+                        'billing_month' => $currentMonth,
+                        'package' => $validated['package'] ?? '',
+                        'speed' => $validated['profile'] ?? '',
+                        'amount' => $firstMonthBill,
+                        'status' => 'unpaid',
+                        'generated_at' => Carbon::now()->format('d F Y'),
+                    ]);
                 }
 
                 return response()->json(['message' => 'Client created successfully']);

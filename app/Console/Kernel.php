@@ -36,6 +36,12 @@ class Kernel extends ConsoleKernel
             ->dailyAt('00:01')
             ->withoutOverlapping()
             ->onOneServer();
+
+        // Retry pending MikroTik re-enables for paid customers every hour
+        $schedule->command('mikrotik:sync-pending')
+            ->hourly()
+            ->withoutOverlapping()
+            ->onOneServer();
     }
 
     /**

@@ -249,7 +249,6 @@ class InvoiceController extends Controller
     public function store(Request $request)
     {
         try {
-            $user = Auth::user();
             $clientcode = $request->input('clientcode');
             $discount = $request->input('discount', 0);
             $transactionno = $request->input('transactionno');
@@ -261,8 +260,10 @@ class InvoiceController extends Controller
             $customer_id = $request->input('Cus_id');
 
             $total_amount = $discount + $recieveamount;
+            // recieved_date is a DATE column — always store standard SQL format (Y-m-d),
+            // never a human-readable string like '13 August 2026'.
             $date = Carbon::parse($recievedate);
-            $formattedDate = $date->format('d F Y');
+            $formattedDate = $date->format('Y-m-d');
 
             $payment_id = 'PAY-' . time() . rand(100, 999);
 
@@ -276,7 +277,8 @@ class InvoiceController extends Controller
                 'recieved_by' => $recieveby,
                 'discount' => $discount,
                 'transaction_no' => $transactionno,
-                'created_by' => $user->name,
+                // created_by is an unsignedBigInteger FK to users.id — store the user ID, not the name.
+                'created_by' => auth()->id(),
                 'notes' => $notes,
                 'payment_info' => $paymentmethod,
                 'payment_method' => $paymentmethod,
@@ -325,66 +327,130 @@ public function pendingPayments()
     // 3. পেমেন্ট অ্যাপ্রুভ করা (এখানে ইনভয়েস আপডেট হবে এবং মেইল যাবে)
     public function approvePayment(Request $request, $id)
     {
-        DB::beginTransaction();
-
         try {
             $user = Auth::user();
 
-            $payment = Payment::where('id', $id)->where('approval_status', 'pending')->firstOrFail();
-            $customer_id = $payment->customer_id;
+            $result = DB::transaction(function () use ($request, $id, $user) {
+                // Lock the payment row so the same payment cannot be approved twice
+                $payment = Payment::where('id', $id)
+                    ->where('approval_status', 'pending')
+                    ->lockForUpdate()
+                    ->firstOrFail();
+                $customer_id = $payment->customer_id;
 
-            $invoice = Invoice::where('customer_id', $customer_id)->first();
-            if (!$invoice) {
-                return response()->json(['error' => 'Invoice not found for this customer.'], 404);
-            }
+                // Lock ALL open invoices for this customer so concurrent
+                // approvals never read stale balances (FIFO settlement).
+                $invoices = Invoice::where('customer_id', $customer_id)
+                    ->whereIn('status', ['unpaid', 'partial'])
+                    ->orderBy('id')
+                    ->lockForUpdate()
+                    ->get();
 
-            // ডিউ ও অ্যাডভান্স হিসাব
-            $payableamount = $invoice->amount;
-            $recieveamount = $payment->received_amount;
-            $balancedue = $payableamount - ($recieveamount + $payment->discount);
+                if ($invoices->isEmpty() && !Invoice::where('customer_id', $customer_id)->exists()) {
+                    return response()->json(['error' => 'Invoice not found for this customer.'], 404);
+                }
 
-            $advance = 0;
-            if ($balancedue < 0) {
-                $advance = -$balancedue;
-                $status = 'paid';
-            } elseif ($balancedue == 0) {
-                $status = 'paid';
-            } else {
-                $status = 'unpaid';
-            }
+                // Total payment being settled: received amount + discount granted.
+                // (invoices.amount IS the running due balance in this app — it
+                // plays the role of due_amount, so no separate column is needed.)
+                $paymentAmount = (float) $payment->received_amount + (float) $payment->discount;
 
-            // ১. ইনভয়েস আপডেট
-            $invoice->update([
-                'advance' => $advance,
-                'status' => $status,
-                'received_amount' => $invoice->received_amount + $recieveamount,
-                'transaction_no' => $payment->transaction_no,
-                'notes' => $payment->notes,
-            ]);
+                // FIFO: apply the payment to the oldest open invoices first.
+                $lastInvoice = null;
+                foreach ($invoices as $invoice) {
+                    $due = (float) $invoice->amount;
+                    if ($paymentAmount >= $due) {
+                        // Payment covers this invoice in full.
+                        $paymentAmount -= $due;
+                        $invoice->amount = 0;
+                        $invoice->status = 'paid';
+                    } else {
+                        // Partial payment — deduct what remains and mark Partial.
+                        $invoice->amount = $due - $paymentAmount;
+                        $invoice->status = 'partial';
+                        $paymentAmount = 0;
+                    }
+                    $lastInvoice = $invoice;
+                    $invoice->save();
 
-            // ২. পেমেন্ট স্ট্যাটাস Approved করা
-            $payment->update([
-                'payment_status' => ($status === 'paid') ? 'paid' : 'partial',
-                'approval_status' => 'approved',
-                'approved_by' => $user->id,
-                'approved_at' => now(),
-            ]);
+                    if ($paymentAmount <= 0) {
+                        break;
+                    }
+                }
 
-            // ৩. মেইল পাঠানো (অ্যাপ্রুভ হওয়ার পর)
-            $customer = Customer::find($customer_id);
-            if ($customer && $customer->email) {
-                Mail::to($customer->email)
-                    ->send(new PaymentSuccessMail($payment->total_amount, $payment->transaction_no, $customer->name));
-            }
+                // Overpayment: leftover beyond all open invoices becomes advance
+                // on the most recent invoice (a negative amount reflects credit).
+                if ($paymentAmount > 0) {
+                    $advanceInvoice = $lastInvoice
+                        ?? Invoice::where('customer_id', $customer_id)->latest('id')->first();
+                    if ($advanceInvoice) {
+                        $advanceInvoice->amount = (float) $advanceInvoice->amount - $paymentAmount;
+                        $advanceInvoice->advance = abs($advanceInvoice->amount);
+                        $advanceInvoice->status = 'paid';
+                        $advanceInvoice->save();
+                        $lastInvoice = $advanceInvoice;
+                    }
+                }
 
-            DB::commit();
+                // Received total + transaction reference live on the last
+                // invoice touched (keeps the Received column meaningful).
+                if ($lastInvoice) {
+                    $lastInvoice->received_amount = (float) $lastInvoice->received_amount
+                        + (float) $payment->received_amount;
+                    $lastInvoice->transaction_no = $payment->transaction_no;
+                    $lastInvoice->notes = $payment->notes;
+                    $lastInvoice->save();
+                }
 
-            return response()->json([
-                'message' => 'Payment approved successfully and confirmation email sent!'
-            ], 200);
+                // Remaining due after allocation drives the payment status.
+                $remainingDue = Invoice::where('customer_id', $customer_id)
+                    ->whereIn('status', ['unpaid', 'partial'])
+                    ->sum('amount');
+
+                // ২. পেমেন্ট স্ট্যাটাস Approved করা
+                $payment->update([
+                    'payment_status' => $remainingDue <= 0 ? 'paid' : 'partial',
+                    'approval_status' => 'approved',
+                    'approved_by' => $user->id,
+                    'approved_at' => now(),
+                ]);
+
+                // ৩. মেইল পাঠানো (অ্যাপ্রুভ হওয়ার পর)
+                $customer = Customer::find($customer_id);
+                if ($customer && $customer->email) {
+                    Mail::to($customer->email)
+                        ->send(new PaymentSuccessMail($payment->total_amount, $payment->transaction_no, $customer->name));
+                }
+
+                // Customer due sync: previous_due mirrors the remaining unpaid
+                // invoice totals after settlement.
+                if ($customer) {
+                    $customer->previous_due = $remainingDue;
+                    $customer->save();
+                }
+
+                // ৪. বিল সম্পূর্ণ পরিশোধ হলে Active কাস্টমারের MikroTik সার্ভিস আবার enable
+                // (status enum মান ছোট হাতের 'active'; billingstatus 'Active' রাখা হয়)
+                if ($customer && $remainingDue <= 0 && $customer->status === 'active') {
+                    try {
+                        app(\App\Services\ScheduledChangeService::class)->reEnableMikrotik($customer);
+                        Invoice::where('customer_id', $customer_id)->update(['pending_mikrotik_sync' => false]);
+                    } catch (\Exception $e) {
+                        // MikroTik ব্যর্থ হলেও পেমেন্ট অ্যাপ্রুভাল ট্রানজেকশন ব্যর্থ হবে না —
+                        // ইনভয়েসটি পেন্ডিং সিঙ্ক হিসাবে চিহ্নিত হয়।
+                        Log::error("MikroTik re-enable failed for customer {$customer_id} after payment approval: {$e->getMessage()}");
+                        Invoice::where('customer_id', $customer_id)->update(['pending_mikrotik_sync' => true]);
+                    }
+                }
+
+                return response()->json([
+                    'message' => 'Payment approved successfully and confirmation email sent!'
+                ], 200);
+            });
+
+            return $result;
 
         } catch (\Exception $e) {
-            DB::rollBack();
             return response()->json([
                 'error' => 'An error occurred while approving payment.',
                 'message' => $e->getMessage()
@@ -425,29 +491,45 @@ public function pendingPayments()
             $customer_id = $request->input('customer_id');
             $id = $request->input('id');
 
-            $payment = Payment::where('customer_id', $customer_id)->where('id', $id)->first();
+            $result = DB::transaction(function () use ($customer_id, $id) {
+                $payment = Payment::where('customer_id', $customer_id)
+                    ->where('id', $id)
+                    ->lockForUpdate()
+                    ->first();
 
-            if (!$payment) {
-                return response()->json(['error' => 'Payment not found.'], 404);
-            }
+                if (!$payment) {
+                    return response()->json(['error' => 'Payment not found.'], 404);
+                }
 
             // পেমেন্টটি যদি অলরেডি Approved হয়ে থাকে, তবেই ইনভয়েস ব্যালেন্স রোলব্যাক করা হবে
             if ($payment->approval_status === 'approved') {
-                $invoice = Invoice::where('customer_id', $customer_id)->first();
+                $invoice = Invoice::where('customer_id', $customer_id)->lockForUpdate()->first();
                 if ($invoice) {
-                    $invoice->update([
-                        'amount' => $invoice->amount + $payment->total_amount,
-                        'status' => 'unpaid',
-                        'advance' => 0,
-                    ]);
+                    // 1. Add back the payment to the outstanding balance
+                    $invoice->amount += ($payment->received_amount + $payment->discount);
+
+                    // 2. Decrement the received total (never below zero)
+                    $invoice->received_amount = max(0, $invoice->received_amount - $payment->received_amount);
+
+                    // 3. Status follows the remaining balance
+                    $invoice->status = ($invoice->amount <= 0) ? 'paid' : 'unpaid';
+
+                    // 4. Advance must mirror a negative amount (credit)
+                    $invoice->advance = ($invoice->amount < 0) ? abs($invoice->amount) : 0;
+
+                    $invoice->save();
                 }
             }
 
-            $payment->delete();
+                $payment->delete();
 
-            return response()->json([
-                'message' => 'Payment Deleted Successfully'
-            ]);
+                return response()->json([
+                    'message' => 'Payment Deleted Successfully'
+                ]);
+            });
+
+            return $result;
+
         } catch (\Exception $e) {
             return response()->json([
                 'error' => 'An error occurred while processing the data.',

@@ -169,8 +169,10 @@ public function clientList(Request $request)
 
             // Calculate total amount
             $total_amount = $discount + $recieveamount;
+            // recieved_date is a DATE column — always store standard SQL format (Y-m-d),
+            // never a human-readable string like '13 August 2026'.
             $date = Carbon::parse($recievedate);
-            $formattedDate = $date->format('d F Y');
+            $formattedDate = $date->format('Y-m-d');
 
             // Update invoice
             $invoice = Invoice::where('customer_id', $customer_id)->first();
@@ -192,7 +194,8 @@ public function clientList(Request $request)
                 'recieved_by' => $recieveby,
                 'discount' => $discount,
                 'transaction_no' => $transactionno,
-                'created_by' => $user->name,
+                // created_by is an unsignedBigInteger FK to users.id — store the user ID, not the name.
+                'created_by' => $user->id,
                 'notes' => $notes,
                 'payment_info' => $paymentmethod,
                 'total_amount' => $total_amount,
