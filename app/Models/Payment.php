@@ -18,6 +18,24 @@ class Payment extends Model
         return $this->belongsTo(Customer::class);
     }
 
+    /**
+     * The user who created/submitted this payment (FK: created_by).
+     * Legacy rows may store the user's name string instead of an ID,
+     * so the relation can be null for those rows.
+     */
+    public function creator()
+    {
+        return $this->belongsTo(User::class, 'created_by');
+    }
+
+    /**
+     * The user who approved this payment (FK: approved_by).
+     */
+    public function approver()
+    {
+        return $this->belongsTo(User::class, 'approved_by');
+    }
+
     protected static function boot()
     {
         parent::boot();

@@ -304,7 +304,7 @@ class InvoiceController extends Controller
 public function pendingPayments()
 {
     try {
-        $pendingPayments = Payment::with('customer')
+        $pendingPayments = Payment::with(['customer', 'creator:id,name', 'approver:id,name'])
             ->where('approval_status', 'pending')
             ->latest()
             ->get();
@@ -330,118 +330,14 @@ public function pendingPayments()
         try {
             $user = Auth::user();
 
-            $result = DB::transaction(function () use ($request, $id, $user) {
+            $result = DB::transaction(function () use ($id, $user) {
                 // Lock the payment row so the same payment cannot be approved twice
                 $payment = Payment::where('id', $id)
                     ->where('approval_status', 'pending')
                     ->lockForUpdate()
                     ->firstOrFail();
-                $customer_id = $payment->customer_id;
 
-                // Lock ALL open invoices for this customer so concurrent
-                // approvals never read stale balances (FIFO settlement).
-                $invoices = Invoice::where('customer_id', $customer_id)
-                    ->whereIn('status', ['unpaid', 'partial'])
-                    ->orderBy('id')
-                    ->lockForUpdate()
-                    ->get();
-
-                if ($invoices->isEmpty() && !Invoice::where('customer_id', $customer_id)->exists()) {
-                    return response()->json(['error' => 'Invoice not found for this customer.'], 404);
-                }
-
-                // Total payment being settled: received amount + discount granted.
-                // (invoices.amount IS the running due balance in this app — it
-                // plays the role of due_amount, so no separate column is needed.)
-                $paymentAmount = (float) $payment->received_amount + (float) $payment->discount;
-
-                // FIFO: apply the payment to the oldest open invoices first.
-                $lastInvoice = null;
-                foreach ($invoices as $invoice) {
-                    $due = (float) $invoice->amount;
-                    if ($paymentAmount >= $due) {
-                        // Payment covers this invoice in full.
-                        $paymentAmount -= $due;
-                        $invoice->amount = 0;
-                        $invoice->status = 'paid';
-                    } else {
-                        // Partial payment — deduct what remains and mark Partial.
-                        $invoice->amount = $due - $paymentAmount;
-                        $invoice->status = 'partial';
-                        $paymentAmount = 0;
-                    }
-                    $lastInvoice = $invoice;
-                    $invoice->save();
-
-                    if ($paymentAmount <= 0) {
-                        break;
-                    }
-                }
-
-                // Overpayment: leftover beyond all open invoices becomes advance
-                // on the most recent invoice (a negative amount reflects credit).
-                if ($paymentAmount > 0) {
-                    $advanceInvoice = $lastInvoice
-                        ?? Invoice::where('customer_id', $customer_id)->latest('id')->first();
-                    if ($advanceInvoice) {
-                        $advanceInvoice->amount = (float) $advanceInvoice->amount - $paymentAmount;
-                        $advanceInvoice->advance = abs($advanceInvoice->amount);
-                        $advanceInvoice->status = 'paid';
-                        $advanceInvoice->save();
-                        $lastInvoice = $advanceInvoice;
-                    }
-                }
-
-                // Received total + transaction reference live on the last
-                // invoice touched (keeps the Received column meaningful).
-                if ($lastInvoice) {
-                    $lastInvoice->received_amount = (float) $lastInvoice->received_amount
-                        + (float) $payment->received_amount;
-                    $lastInvoice->transaction_no = $payment->transaction_no;
-                    $lastInvoice->notes = $payment->notes;
-                    $lastInvoice->save();
-                }
-
-                // Remaining due after allocation drives the payment status.
-                $remainingDue = Invoice::where('customer_id', $customer_id)
-                    ->whereIn('status', ['unpaid', 'partial'])
-                    ->sum('amount');
-
-                // ২. পেমেন্ট স্ট্যাটাস Approved করা
-                $payment->update([
-                    'payment_status' => $remainingDue <= 0 ? 'paid' : 'partial',
-                    'approval_status' => 'approved',
-                    'approved_by' => $user->id,
-                    'approved_at' => now(),
-                ]);
-
-                // ৩. মেইল পাঠানো (অ্যাপ্রুভ হওয়ার পর)
-                $customer = Customer::find($customer_id);
-                if ($customer && $customer->email) {
-                    Mail::to($customer->email)
-                        ->send(new PaymentSuccessMail($payment->total_amount, $payment->transaction_no, $customer->name));
-                }
-
-                // Customer due sync: previous_due mirrors the remaining unpaid
-                // invoice totals after settlement.
-                if ($customer) {
-                    $customer->previous_due = $remainingDue;
-                    $customer->save();
-                }
-
-                // ৪. বিল সম্পূর্ণ পরিশোধ হলে Active কাস্টমারের MikroTik সার্ভিস আবার enable
-                // (status enum মান ছোট হাতের 'active'; billingstatus 'Active' রাখা হয়)
-                if ($customer && $remainingDue <= 0 && $customer->status === 'active') {
-                    try {
-                        app(\App\Services\ScheduledChangeService::class)->reEnableMikrotik($customer);
-                        Invoice::where('customer_id', $customer_id)->update(['pending_mikrotik_sync' => false]);
-                    } catch (\Exception $e) {
-                        // MikroTik ব্যর্থ হলেও পেমেন্ট অ্যাপ্রুভাল ট্রানজেকশন ব্যর্থ হবে না —
-                        // ইনভয়েসটি পেন্ডিং সিঙ্ক হিসাবে চিহ্নিত হয়।
-                        Log::error("MikroTik re-enable failed for customer {$customer_id} after payment approval: {$e->getMessage()}");
-                        Invoice::where('customer_id', $customer_id)->update(['pending_mikrotik_sync' => true]);
-                    }
-                }
+                $this->applyApproval($payment, $user);
 
                 return response()->json([
                     'message' => 'Payment approved successfully and confirmation email sent!'
@@ -451,10 +347,191 @@ public function pendingPayments()
             return $result;
 
         } catch (\Exception $e) {
+            // Preserve the original 404 behaviour for customers without invoices.
+            if ($e->getMessage() === 'Invoice not found for this customer.') {
+                return response()->json(['error' => 'Invoice not found for this customer.'], 404);
+            }
             return response()->json([
                 'error' => 'An error occurred while approving payment.',
                 'message' => $e->getMessage()
             ], 500);
+        }
+    }
+
+    // 3b. বাল্ক পেমেন্ট অ্যাপ্রুভ করা — সবগুলো পেমেন্ট একটি ট্রানজেকশনে FIFO সেটেল হয়
+    public function bulkApprove(Request $request)
+    {
+        try {
+            $request->validate([
+                'payment_ids' => 'required|array',
+                'payment_ids.*' => 'integer',
+            ]);
+
+            $user = Auth::user();
+            $ids = array_values(array_unique(array_filter((array) $request->input('payment_ids'))));
+
+            if (empty($ids)) {
+                return response()->json(['error' => 'No payment IDs provided.'], 422);
+            }
+
+            $result = DB::transaction(function () use ($ids, $user) {
+                $approved = 0;
+                $skipped = 0;
+
+                foreach ($ids as $id) {
+                    // Lock each payment row — rows already approved (or that no
+                    // longer exist) are skipped without failing the whole batch.
+                    $payment = Payment::where('id', $id)
+                        ->where('approval_status', 'pending')
+                        ->lockForUpdate()
+                        ->first();
+
+                    if (!$payment) {
+                        $skipped++;
+                        continue;
+                    }
+
+                    $this->applyApproval($payment, $user);
+                    $approved++;
+                }
+
+                return ['approved' => $approved, 'skipped' => $skipped];
+            });
+
+            $message = $result['approved'] > 0
+                ? "{$result['approved']} payment(s) approved successfully."
+                : 'No pending payments were approved.';
+            if ($result['skipped'] > 0) {
+                $message .= " {$result['skipped']} payment(s) were skipped (already approved or not found).";
+            }
+
+            return response()->json([
+                'message' => $message,
+                'approved' => $result['approved'],
+                'skipped' => $result['skipped'],
+            ], 200);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'error' => 'An error occurred while approving payments.',
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Shared approval logic: settles a payment against the customer's open
+     * invoices (FIFO) inside the caller's DB transaction, marks the payment
+     * approved, syncs the customer due, sends the confirmation email and
+     * re-enables MikroTik when the account becomes fully paid.
+     */
+    private function applyApproval(Payment $payment, $user)
+    {
+        $customer_id = $payment->customer_id;
+
+        // Lock ALL open invoices for this customer so concurrent
+        // approvals never read stale balances (FIFO settlement).
+        $invoices = Invoice::where('customer_id', $customer_id)
+            ->whereIn('status', ['unpaid', 'partial'])
+            ->orderBy('id')
+            ->lockForUpdate()
+            ->get();
+
+        if ($invoices->isEmpty() && !Invoice::where('customer_id', $customer_id)->exists()) {
+            throw new \Exception('Invoice not found for this customer.');
+        }
+
+        // Total payment being settled: received amount + discount granted.
+        // (invoices.amount IS the running due balance in this app — it
+        // plays the role of due_amount, so no separate column is needed.)
+        $paymentAmount = (float) $payment->received_amount + (float) $payment->discount;
+
+        // FIFO: apply the payment to the oldest open invoices first.
+        $lastInvoice = null;
+        foreach ($invoices as $invoice) {
+            $due = (float) $invoice->amount;
+            if ($paymentAmount >= $due) {
+                // Payment covers this invoice in full.
+                $paymentAmount -= $due;
+                $invoice->amount = 0;
+                $invoice->status = 'paid';
+            } else {
+                // Partial payment — deduct what remains and mark Partial.
+                $invoice->amount = $due - $paymentAmount;
+                $invoice->status = 'partial';
+                $paymentAmount = 0;
+            }
+            $lastInvoice = $invoice;
+            $invoice->save();
+
+            if ($paymentAmount <= 0) {
+                break;
+            }
+        }
+
+        // Overpayment: leftover beyond all open invoices becomes advance
+        // on the most recent invoice (a negative amount reflects credit).
+        if ($paymentAmount > 0) {
+            $advanceInvoice = $lastInvoice
+                ?? Invoice::where('customer_id', $customer_id)->latest('id')->first();
+            if ($advanceInvoice) {
+                $advanceInvoice->amount = (float) $advanceInvoice->amount - $paymentAmount;
+                $advanceInvoice->advance = abs($advanceInvoice->amount);
+                $advanceInvoice->status = 'paid';
+                $advanceInvoice->save();
+                $lastInvoice = $advanceInvoice;
+            }
+        }
+
+        // Received total + transaction reference live on the last
+        // invoice touched (keeps the Received column meaningful).
+        if ($lastInvoice) {
+            $lastInvoice->received_amount = (float) $lastInvoice->received_amount
+                + (float) $payment->received_amount;
+            $lastInvoice->transaction_no = $payment->transaction_no;
+            $lastInvoice->notes = $payment->notes;
+            $lastInvoice->save();
+        }
+
+        // Remaining due after allocation drives the payment status.
+        $remainingDue = Invoice::where('customer_id', $customer_id)
+            ->whereIn('status', ['unpaid', 'partial'])
+            ->sum('amount');
+
+        // ২. পেমেন্ট স্ট্যাটাস Approved করা
+        $payment->update([
+            'payment_status' => $remainingDue <= 0 ? 'paid' : 'partial',
+            'approval_status' => 'approved',
+            'approved_by' => $user->id,
+            'approved_at' => now(),
+        ]);
+
+        // ৩. মেইল পাঠানো (অ্যাপ্রুভ হওয়ার পর)
+        $customer = Customer::find($customer_id);
+        if ($customer && $customer->email) {
+            Mail::to($customer->email)
+                ->send(new PaymentSuccessMail($payment->total_amount, $payment->transaction_no, $customer->name));
+        }
+
+        // Customer due sync: previous_due mirrors the remaining unpaid
+        // invoice totals after settlement.
+        if ($customer) {
+            $customer->previous_due = $remainingDue;
+            $customer->save();
+        }
+
+        // ৪. বিল সম্পূর্ণ পরিশোধ হলে Active কাস্টমারের MikroTik সার্ভিস আবার enable
+        // (status enum মান ছোট হাতের 'active'; billingstatus 'Active' রাখা হয়)
+        if ($customer && $remainingDue <= 0 && $customer->status === 'active') {
+            try {
+                app(\App\Services\ScheduledChangeService::class)->reEnableMikrotik($customer);
+                Invoice::where('customer_id', $customer_id)->update(['pending_mikrotik_sync' => false]);
+            } catch (\Exception $e) {
+                // MikroTik ব্যর্থ হলেও পেমেন্ট অ্যাপ্রুভাল ট্রানজেকশন ব্যর্থ হবে না —
+                // ইনভয়েসটি পেন্ডিং সিঙ্ক হিসাবে চিহ্নিত হয়।
+                Log::error("MikroTik re-enable failed for customer {$customer_id} after payment approval: {$e->getMessage()}");
+                Invoice::where('customer_id', $customer_id)->update(['pending_mikrotik_sync' => true]);
+            }
         }
     }
 
@@ -588,7 +665,9 @@ public function pendingPayments()
     {
         try {
             $customer_id = $request->input('id');
-            $paymentData = Payment::where('customer_id', $customer_id)->get();
+            $paymentData = Payment::with(['creator:id,name', 'approver:id,name'])
+                ->where('customer_id', $customer_id)
+                ->get();
 
             if (!$paymentData) {
                 return response()->json(['error' => 'Bill Is Not Generated Yet.'], 404);

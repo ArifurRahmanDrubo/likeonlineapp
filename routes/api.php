@@ -348,6 +348,7 @@ Route::middleware(['auth:sanctum'])->group(function () {
     Route::get('/payments/pending', [InvoiceController::class, 'pendingPayments'])->middleware('permission:payments,read');
     Route::post('/payment/approve/{id}', [InvoiceController::class, 'approvePayment'])->middleware('permission:payments,write');
     Route::post('/payment/reject/{id}', [InvoiceController::class, 'rejectPayment'])->middleware('permission:payments,write');
+    Route::post('/payments/bulk-approve', [InvoiceController::class, 'bulkApprove'])->middleware('permission:payments,write');
 
     Route::get('get-payment', [InvoiceController::class, 'index']);
 

@@ -17,7 +17,7 @@ class DailyCollectionController extends Controller
         $currentDate = Carbon::now()->toDateString();
 
         // Fetch daily payments with customer details
-        $dailyPayments = Payment::with('customer.invoice')
+        $dailyPayments = Payment::with(['customer.invoice', 'creator:id,name', 'approver:id,name'])
             ->whereDate('created_at', $currentDate)
             ->get();
 
@@ -41,7 +41,7 @@ class DailyCollectionController extends Controller
             $fromDate = $request->filled('fromDate') ? Carbon::parse($request->input('fromDate'))->format('Y-m-d') : null;
 
             // Build query
-            $query = Payment::with('customer.invoice');
+            $query = Payment::with(['customer.invoice', 'creator:id,name', 'approver:id,name']);
 
             if ($request->filled('userId')) {
                 $query->where('customer_id', $request->input('userId'));

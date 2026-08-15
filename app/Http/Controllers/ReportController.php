@@ -16,7 +16,7 @@ class ReportController extends Controller
         $currentDate = Carbon::now()->toDateString();
 
         // Fetch daily payments with customer details
-        $dailyPayments = Payment::with('customer.invoice')
+        $dailyPayments = Payment::with(['customer.invoice', 'creator:id,name', 'approver:id,name'])
             ->get();
 
         // Return data as JSON response
@@ -41,7 +41,7 @@ class ReportController extends Controller
             $fromDate = $request->filled('fromDate') ? Carbon::parse($request->input('fromDate'))->format('Y-m-d') : null;
 
             // Build query
-            $query = Payment::with('customer.invoice');
+            $query = Payment::with(['customer.invoice', 'creator:id,name', 'approver:id,name']);
 
             if ($request->filled('userId')) {
                 $query->where('customer_id', $request->input('userId'));
@@ -110,7 +110,7 @@ class ReportController extends Controller
             $fromDate = $request->filled('fromDate') ? Carbon::parse($request->input('fromDate'))->format('Y-m-d') : null;
 
             // Build query
-            $query = Payment::with('customer.invoice');
+            $query = Payment::with(['customer.invoice', 'creator:id,name', 'approver:id,name']);
 
             if ($request->filled('userId')) {
                 $query->where('customer_id', $request->input('userId'));
@@ -155,7 +155,7 @@ class ReportController extends Controller
     {
         try {
             // Build query to get all payments with a discount value
-            $paymentData = Payment::with('customer.invoice')
+            $paymentData = Payment::with(['customer.invoice', 'creator:id,name', 'approver:id,name'])
                 ->whereNotNull('discount')
                 ->where('discount', '>', 0)
                 ->get();
