@@ -34,8 +34,8 @@ return new class extends Migration
             $table->string('email')->nullable()->unique();
             $table->string('district')->nullable();
             $table->string('upzila')->nullable();
-            $table->string('department')->nullable();
-            $table->string('position')->nullable();
+            $table->foreignId('department_id')->nullable()->constrained('departments')->nullOnDelete();
+            $table->foreignId('position_id')->nullable()->constrained('positions')->nullOnDelete();
             $table->text('praddress')->nullable();
             $table->text('paraddress')->nullable();
             $table->string('referenceby')->nullable();
@@ -44,9 +44,11 @@ return new class extends Migration
             $table->string('registrationimage')->nullable();
             $table->string('joiningdate')->nullable();
             $table->decimal('basic_salary', 8, 2);
-            $table->string('profileimage_public_id')->nullable()->after('profileimage');
-            $table->string('nidimage_public_id')->nullable()->after('nidimage');
-            $table->string('registrationimage_public_id')->nullable()->after('registrationimage');
+            $table->string('profileimage_public_id')->nullable();
+            $table->string('nidimage_public_id')->nullable();
+            $table->string('registrationimage_public_id')->nullable();
+            $table->unsignedBigInteger('shift_id')->nullable();
+            $table->foreign('shift_id')->references('id')->on('shifts')->onDelete('set null');
             $table->timestamps();
         });
     }

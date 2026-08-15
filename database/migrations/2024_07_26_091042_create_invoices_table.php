@@ -21,8 +21,9 @@ return new class extends Migration
             $table->decimal('advance', 8, 2)->default(0);
             $table->string('transaction_no')->nullable();
             $table->text('notes')->nullable();
-            $table->enum('status', ['paid', 'unpaid'])->default('unpaid');
-           $table->boolean('pending_mikrotik_sync')->default(false);
+            $table->enum('status', ['paid', 'unpaid', 'partial'])->default('unpaid');
+            $table->boolean('pending_mikrotik_sync')->default(false);
+     
             $table->foreign('customer_id')->references('id')->on('customers')->onDelete('cascade');
             $table->timestamps();
         });

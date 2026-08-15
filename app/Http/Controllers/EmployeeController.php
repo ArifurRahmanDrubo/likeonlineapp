@@ -5,22 +5,18 @@ namespace App\Http\Controllers;
 use Exception;
 use Carbon\Carbon;
 
-use App\Models\Advance;
-
+use App\Models\User;
 use App\Models\LateFee;
-use App\Models\Payroll;
-use App\Models\Payslip;
 use App\Models\Employee;
+use App\Models\CustomRole;
 use App\Models\Overtime;
 use App\Models\Allowance;
-use App\Models\Attendance;
+use App\Models\Payroll;
 use Illuminate\Http\Request;
-use App\Models\Generatedsallary;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Http;
-use Illuminate\Support\Facades\Log;
-use Illuminate\Database\QueryException;
-use Illuminate\Support\Facades\Storage;
-use Dotenv\Exception\ValidationException;
+use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 
 
 class EmployeeController extends Controller
@@ -28,7 +24,7 @@ class EmployeeController extends Controller
     public function index()
     {
         try {
-            $Employees = Employee::with('payroll')->get();
+            $Employees = Employee::with(['payroll', 'department', 'position', 'shift', 'latestPayslip'])->get();
             return response()->json([
                 'Employees' => $Employees
             ], 200);
@@ -41,7 +37,7 @@ class EmployeeController extends Controller
     public function getEmployee($id)
     {
         try {
-            $Employee = Employee::with('payroll')->find($id);
+            $Employee = Employee::with(['payroll', 'department', 'position', 'shift', 'latestPayslip', 'user.role.permissions'])->find($id);
 
             if (!$Employee) {
                 return response()->json([
@@ -98,8 +94,9 @@ class EmployeeController extends Controller
                 'email' => 'nullable|string|email|max:255',
                 'district' => 'nullable|string|max:255',
                 'upzila' => 'nullable|string|max:255',
-                'department' => 'nullable|string|max:255',
-                'position' => 'nullable|string|max:255',
+                'department_id' => 'nullable|exists:departments,id',
+                'position_id' => 'nullable|exists:positions,id',
+                'shift_id' => 'nullable|exists:shifts,id',
                 'praddress' => 'nullable|string',
                 'paraddress' => 'nullable|string',
                 'referenceby' => 'nullable|string|max:255',
@@ -129,19 +126,93 @@ class EmployeeController extends Controller
             $formattedDate1 = $date1->format('d F Y');
             $validated['dateofbirth'] = $formattedDate1;
             if ($request->input('id')) {
-                $Employee = Employee::findOrFail($request->input('id'));
-                $Employee->update($validated);
-                return response()->json(['message' => 'Employee updated successfully']);
+                $employee = Employee::findOrFail($request->input('id'));
+                $employee->update($validated);
+                $message = 'Employee updated successfully';
             } else {
-                Employee::create($validated);
+                $employee = Employee::create($validated);
+                $message = 'Employee created successfully';
             }
 
-            return response()->json(['message' => 'Employee created successfully']);
+            // Every employee gets a 1-to-1 master ledger (payrolls) record.
+            // Balances are never overwritten on update — only basic salary/status sync.
+            $ledger = Payroll::firstOrCreate(
+                ['employee_id' => $employee->id],
+                [
+                    'basic_salary' => $validated['basic_salary'] ?? 0,
+                    'advance_balance' => 0,
+                    'due_balance' => 0,
+                    'status' => 'active',
+                ]
+            );
+            if ((float) $ledger->basic_salary !== (float) ($validated['basic_salary'] ?? 0)) {
+                $ledger->update([
+                    'basic_salary' => $validated['basic_salary'] ?? 0,
+                    'status' => 'active',
+                ]);
+            }
+
+            // Optionally create / update a linked system user account
+            if ($request->boolean('create_user_account')) {
+                $this->createOrUpdateUserAccount($employee, $request);
+            }
+
+            return response()->json(['message' => $message]);
+        } catch (ValidationException $e) {
+            return response()->json([
+                'message' => $e->getMessage(),
+                'errors' => $e->errors(),
+            ], 422);
         } catch (\Exception $e) {
             return response()->json([
                 'message' => $e->getMessage()
             ], 500);
         }
+    }
+
+    /**
+     * Create or update the User entity linked to an employee (employees.user_id).
+     */
+    private function createOrUpdateUserAccount(Employee $employee, Request $request)
+    {
+        $request->validate([
+            'user_role_id' => 'required|exists:roles,id',
+            'password' => 'nullable|string|min:6',
+        ]);
+
+        $user = $employee->user;
+        $password = $request->input('password');
+
+        if ($user) {
+            // Update the existing linked account
+            $updates = [
+                'name' => $employee->name,
+                'email' => $employee->email ?? $user->email,
+            ];
+            if ($password) {
+                $updates['password'] = Hash::make($password);
+            }
+            $user->update($updates);
+        } else {
+            // Create a new system user account
+            if (!$employee->email) {
+                throw ValidationException::withMessages([
+                    'email' => 'Email is required to create a system user account.',
+                ]);
+            }
+            $user = User::create([
+                'name' => $employee->name,
+                'email' => $employee->email,
+                'mobile' => $employee->mobile,
+                'status' => 'active',
+                'password' => Hash::make($password ?? Str::random(16)),
+            ]);
+            $employee->update(['user_id' => $user->id]);
+        }
+
+        $role = CustomRole::findOrFail($request->input('user_role_id'));
+        $user->role()->associate($role);
+        $user->save();
     }
     public function destroy(Request $request)
     {
@@ -162,68 +233,6 @@ class EmployeeController extends Controller
         } catch (\Exception $e) {
             return response()->json([
                 'message' => $e->getMessage()
-            ], 500);
-        }
-    }
-    public function attendence(Request $request)
-    {
-        try {
-            $validated = $request->validate([
-                'status' => 'required|string|max:255',
-                'notes' => 'nullable|string',
-                'employee_id' => 'nullable',
-            ]);
-            $employee_id = $request->input('employee_id');
-            $date = $request->input('date');
-            $formatteddate = Carbon::parse($date)->format('Y-m-d');
-            $validated['date'] = $formatteddate;
-
-            Attendance::create($validated);
-            return response()->json(['message' => 'Employee attendence Create successfully']);
-        } catch (\Exception $e) {
-            return response()->json([
-                'message' => 'Employee have attendence for this Day '
-            ], 500);
-        }
-    }
-
-    public function updateAttendence(Request $request)
-    {
-        try {
-            $id = $request->input('id');
-            $date = $request->input('date');
-            $status = $request->input('status');
-            $notes = $request->input('notes');
-            $formatteddate = Carbon::parse($date)->format('Y-m-d');
-
-
-            $attendance = Attendance::where('id', $id)->first();
-            if ($attendance) {
-                $attendance->update([
-                    'date' => $formatteddate,
-                    'status' => $status,
-                    'notes' => $notes,
-                ]);
-                return response()->json(['message' => 'Employee attendence Update successfully']);
-            }
-            return response()->json(['message' => 'Attendance Not found']);
-        } catch (\Exception $e) {
-            return response()->json([
-                'message' => 'Employee have attendence for this Day '
-            ], 500);
-        }
-    }
-    public function getAttendance(Request $request)
-    {
-        try {
-            $employee_id = $request->input('id');
-            $attendance = Attendance::where('employee_id', $employee_id)->get();
-            return response()->json([
-                'attendance' => $attendance
-            ], 200);
-        } catch (\Exception $e) {
-            return response()->json([
-                'message' => $e->getMessage(),
             ], 500);
         }
     }
@@ -388,145 +397,6 @@ class EmployeeController extends Controller
             }
 
             return response()->json(['message' => 'Employee Overtim note found']);
-        } catch (\Exception $e) {
-            return response()->json([
-                'message' => $e->getMessage()
-            ], 500);
-        }
-    }
-    public function advance(Request $request)
-    {
-        try {
-            $validated = $request->validate([
-
-                'amount' => 'nullable',
-                'employee_id' => 'nullable',
-                'notes' => 'nullable',
-
-            ]);
-            $employee_id = $request->input('employee_id');
-            $date = $request->input('date');
-            $formatteddate = Carbon::parse($date)->format('Y-m-d');
-            $validated['date'] = $formatteddate;
-
-            Advance::create($validated);
-            return response()->json(['message' => 'Employee Advance Assign successfully']);
-        } catch (\Exception $e) {
-            return response()->json([
-                'message' => $e->getMessage()
-            ], 500);
-        }
-    }
-    public function getAdvance(Request $request)
-    {
-
-        try {
-            $employee_id = $request->input('id');
-            $Advance = Advance::where('employee_id', $employee_id)->get();
-            return response()->json([
-                'Advance' => $Advance
-            ], 200);
-        } catch (\Exception $e) {
-            return response()->json([
-                'message' => $e->getMessage(),
-            ], 500);
-        }
-    }
-
-    public function deleteAdvance(Request $request)
-    {
-        try {
-            $id = $request->input('id');
-            $employee_id = $request->input('employee_id');
-            $Advance = Advance::where('employee_id', $employee_id)->where('id', $id)->first();
-            if ($Advance) {
-                $Advance->delete();
-                return response()->json(['message' => 'Employee Advance Delete successfully']);
-            }
-
-            return response()->json(['message' => 'Employee Advance note found']);
-        } catch (\Exception $e) {
-            return response()->json([
-                'message' => $e->getMessage()
-            ], 500);
-        }
-    }
-    public function getGeneratedSalary(Request $request)
-    {
-
-        try {
-            $employee_id = $request->input('id');
-            $GeneratedSalary = Generatedsallary::where('employee_id', $employee_id)->get();
-            return response()->json([
-                'GeneratedSalary' => $GeneratedSalary
-            ], 200);
-        } catch (\Exception $e) {
-            return response()->json([
-                'message' => $e->getMessage(),
-            ], 500);
-        }
-    }
-    public function deleteGeneratedSalary(Request $request)
-    {
-        try {
-            $id = $request->input('id');
-            $employee_id = $request->input('employee_id');
-            $GeneratedSalary = Generatedsallary::where('employee_id', $employee_id)->where('id', $id)->first();
-            if ($GeneratedSalary) {
-                $GeneratedSalary->delete();
-                return response()->json(['message' => 'Employee GeneratedSalary Delete successfully']);
-            }
-
-            return response()->json(['message' => 'Employee GeneratedSalary note found']);
-        } catch (\Exception $e) {
-            return response()->json([
-                'message' => $e->getMessage()
-            ], 500);
-        }
-    }
-    public function getPayslip(Request $request)
-    {
-
-        try {
-            $employee_id = $request->input('id');
-            $Payslip = Payslip::where('employee_id', $employee_id)->get();
-            return response()->json([
-                'Payslip' => $Payslip,
-                'message' => 'heloo',
-            ], 200);
-        } catch (\Exception $e) {
-            return response()->json([
-                'message' => $e->getMessage(),
-            ], 500);
-        }
-    }
-    public function deletePayslip(Request $request)
-    {
-
-
-
-
-
-        try {
-            $id = $request->input('id');
-            $employee_id = $request->input('employee_id');
-            $total_amount = $request->input('amount');
-            $Payslip = Payslip::where('employee_id', $employee_id)->where('id', $id)->first();
-
-            if ($Payslip) {
-                $Payroll = Payroll::where('employee_id', $employee_id)->first();
-                $amount = $Payroll->total_salary;
-                $update_amount = $amount + $total_amount;
-                $Payroll->update([
-                    'total_salary' => $update_amount,
-                    'status' => 'unpaid',
-
-                ]);
-                $Payslip->delete();
-                return response()->json(['message' => 'Employee Payslip Delete successfully']);
-            }
-
-            return response()->json(['message' => 'Employee Payslip note found']);
         } catch (\Exception $e) {
             return response()->json([
                 'message' => $e->getMessage()

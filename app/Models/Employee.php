@@ -13,10 +13,30 @@ class Employee extends Model
   protected $guarded = []; 
 
     // The attributes that should be cast to native types.
-    protected $appends = ['formatted_id'];
+    protected $appends = ['formatted_id', 'department_name', 'position_name'];
     public function getFormattedIdAttribute()
     {
-        return 'E' . str_pad($this->attributes['id'], 4, '0', STR_PAD_LEFT);
+        return 'EMP-' . str_pad($this->attributes['id'], 4, '0', STR_PAD_LEFT);
+    }
+    public function department()
+    {
+        return $this->belongsTo(Department::class);
+    }
+    public function position()
+    {
+        return $this->belongsTo(Position::class);
+    }
+    public function shift()
+    {
+        return $this->belongsTo(Shift::class);
+    }
+    public function getDepartmentNameAttribute()
+    {
+        return $this->department ? $this->department->departmenttype : null;
+    }
+    public function getPositionNameAttribute()
+    {
+        return $this->position ? $this->position->name : null;
     }
     public function user()
     {
@@ -54,6 +74,13 @@ class Employee extends Model
     {
         return $this->hasMany(Generatedsallary::class);
     }
+    /**
+     * The most recent monthly payslip snapshot (used by the payroll UI).
+     */
+    public function latestPayslip()
+    {
+        return $this->hasOne(Generatedsallary::class)->latestOfMany('sallary_month');
+    }
 
     protected static function boot()
     {
@@ -83,7 +110,7 @@ class Employee extends Model
                 $employee->payroll()->delete();
             }
             if ($employee->payslip) {
-                $employee->payslip()->delate();
+                $employee->payslip()->delete();
             }
 
             // Delete related payroll record

@@ -21,8 +21,14 @@ return new class extends Migration
             $table->decimal('advances', 10, 2)->default(0); // Total advances
             $table->decimal('absent_deduction', 10, 2)->default(0); // Total advances
             $table->decimal('total_salary', 10, 2); // Total salary after deductions
-            $table->string('payroll_date'); // Date of the payroll
-            $table->string('sallary_month'); // Date of the payroll
+            $table->string('status'); // Date of the payroll
+            $table->string('approval_status')->default('pending_approval');
+            $table->string('payment_status')->nullable();
+    
+            $table->decimal('paid_amount',10,2 )->nullable(); // Date of the payroll
+            $table->decimal('due_amount', 10,2)->nullable(); // Date of the payroll
+            $table->string('payroll_date')->nullable(); // Date of the payroll
+            $table->string('sallary_month')->nullable(); // Date of the payroll
             $table->timestamps();
 
             // Foreign key constraint (assuming you have an 'employees' table)

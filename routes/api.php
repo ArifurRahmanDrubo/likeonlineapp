@@ -18,6 +18,10 @@ use App\Http\Controllers\PackageController;
 
 use App\Http\Controllers\PayheadController;
 use App\Http\Controllers\PayrollController;
+use App\Http\Controllers\AttendanceController;
+use App\Http\Controllers\AdvanceController;
+use App\Http\Controllers\ShiftController;
+use App\Http\Controllers\HrSettingController;
 use App\Http\Controllers\ProductController;
 use App\Http\Controllers\SubZoneController;
 use App\Http\Controllers\AccountsController;
@@ -307,33 +311,49 @@ Route::middleware(['auth:sanctum'])->group(function () {
     Route::get('getCustomerReport', [ReportController::class, 'getCustomerReport']);
     Route::post('getCustomerReportQuery', [ReportController::class, 'getCustomerReportQuery']);
     //employee
-    Route::post('create-employee', [EmployeeController::class, 'store']);
-    Route::post('delete-employee', [HelloController::class, 'DeleteEmployee']);
+    Route::post('create-employee', [EmployeeController::class, 'store'])->middleware('permission:add_employee,write');
+    Route::post('delete-employee', [HelloController::class, 'DeleteEmployee'])->middleware('permission:delete_employee_profile,full');
     Route::post('remove-mikrotikuser', [CustomerController::class, 'removeMikrotikUser']);
 
-    Route::get('getemployee', [EmployeeController::class, 'index']);
-    Route::get('get-employee/{id}', [EmployeeController::class, 'getEmployee']);
-    Route::post('create-attendence', [EmployeeController::class, 'attendence']);
-    Route::post('update-attendance', [EmployeeController::class, 'updateAttendence']);
-    Route::get('get-attendance', [EmployeeController::class, 'getAttendance']);
-    Route::post('create-allowance', [EmployeeController::class, 'allowance']);
-    Route::get('get-allowance', [EmployeeController::class, 'getAllowance']);
-    Route::post('delete-allowance', [EmployeeController::class, 'deleteAllowance']);
-    Route::post('create-latefee', [EmployeeController::class, 'LateFees']);
-    Route::get('get-latefee', [EmployeeController::class, 'getLateFees']);
-    Route::post('delete-latefee', [EmployeeController::class, 'deleteLateFee']);
-    Route::post('create-overtime', [EmployeeController::class, 'overtime']);
-    Route::get('get-overtime', [EmployeeController::class, 'getOvertime']);
-    Route::post('delete-overtime', [EmployeeController::class, 'deleteOvertime']);
-    Route::post('create-advance', [EmployeeController::class, 'advance']);
-    Route::get('get-advance', [EmployeeController::class, 'getAdvance']);
-    Route::post('delete-advance', [EmployeeController::class, 'deleteAdvance']);
+    Route::get('getemployee', [EmployeeController::class, 'index'])->middleware('permission:employee_list,read');
+    Route::get('get-employee/{id}', [EmployeeController::class, 'getEmployee'])->middleware('permission:employee_list,read');
+    //attendance
+    Route::post('create-attendance', [AttendanceController::class, 'store'])->middleware('permission:attendance,write');
+    Route::post('update-attendance', [AttendanceController::class, 'update'])->middleware('permission:attendance,write');
+    Route::get('get-attendance', [AttendanceController::class, 'index'])->middleware('permission:attendance,read');
+    Route::post('attendance/bulk', [AttendanceController::class, 'bulkStore'])->middleware('permission:attendance,write');
+    Route::get('get-attendance-monthly', [AttendanceController::class, 'monthly'])->middleware('permission:attendance,read');
+    // daily punch sheet
+    Route::get('daily-attendance', [AttendanceController::class, 'dailySheet'])->middleware('permission:attendance,read');
+    Route::post('save-daily-attendance', [AttendanceController::class, 'saveDailySheet'])->middleware('permission:attendance,write');
+    // shifts & HR rule settings
+    Route::get('shifts', [ShiftController::class, 'index'])->middleware('permission:attendance,read');
+    Route::post('save-shifts', [ShiftController::class, 'save'])->middleware('permission:attendance,write');
+    Route::get('hr-settings', [HrSettingController::class, 'index'])->middleware('permission:attendance,read');
+    Route::post('save-hr-settings', [HrSettingController::class, 'save'])->middleware('permission:attendance,write');
+    //allowance
+    Route::post('create-allowance', [EmployeeController::class, 'allowance'])->middleware('permission:allowance,write');
+    Route::get('get-allowance', [EmployeeController::class, 'getAllowance'])->middleware('permission:allowance,read');
+    Route::post('delete-allowance', [EmployeeController::class, 'deleteAllowance'])->middleware('permission:allowance,full');
+    //late fees
+    Route::post('create-latefee', [EmployeeController::class, 'LateFees'])->middleware('permission:late_fees,write');
+    Route::get('get-latefee', [EmployeeController::class, 'getLateFees'])->middleware('permission:late_fees,read');
+    Route::post('delete-latefee', [EmployeeController::class, 'deleteLateFee'])->middleware('permission:late_fees,full');
+    //overtime
+    Route::post('create-overtime', [EmployeeController::class, 'overtime'])->middleware('permission:overtime,write');
+    Route::get('get-overtime', [EmployeeController::class, 'getOvertime'])->middleware('permission:overtime,read');
+    Route::post('delete-overtime', [EmployeeController::class, 'deleteOvertime'])->middleware('permission:overtime,full');
+    //advance
+    Route::post('create-advance', [AdvanceController::class, 'store'])->middleware('permission:advance,write');
+    Route::get('get-advance', [AdvanceController::class, 'index'])->middleware('permission:advance,read');
+    Route::post('delete-advance', [AdvanceController::class, 'destroy'])->middleware('permission:advance,full');
 
-    Route::get('get-generatedsalary', [EmployeeController::class, 'getGeneratedSalary']);
-    Route::post('delete-generatedsalary', [EmployeeController::class, 'deleteGeneratedSalary']);
-    Route::get('get-payslipHistory', [EmployeeController::class, 'getPayslip']);
-    Route::post('delete-payslip', [EmployeeController::class, 'deletePayslip']);
-    Route::get('get-employeepdfImages', [EmployeeController::class, 'getpdfImages']);
+    //payroll / salary
+    Route::get('get-generatedsalary', [PayrollController::class, 'generatedSalary'])->middleware('permission:generated_salary_table,read');
+    Route::post('delete-generatedsalary', [PayrollController::class, 'deleteGeneratedSalary'])->middleware('permission:generated_salary_table,full');
+    Route::get('get-payslipHistory', [PayrollController::class, 'payslipHistory'])->middleware('permission:payslip_table,read');
+    Route::post('delete-payslip', [PayrollController::class, 'deletePayslip'])->middleware('permission:payslip_table,full');
+    Route::get('get-employeepdfImages', [EmployeeController::class, 'getpdfImages'])->middleware('permission:employee_profile,read');
 
 
 
@@ -341,9 +361,15 @@ Route::middleware(['auth:sanctum'])->group(function () {
     // Payment execution endpoints are guarded with the same permission scheme
     // as the rest of the ISP Billing module (frontend gates on the same names).
     Route::post('create-payment', [InvoiceController::class, 'store'])->middleware('permission:daily_bill_collection,write');
-    Route::post('create-payslip', [PayrollController::class, 'store']);
-    Route::get('get-payslip', [PayrollController::class, 'index']);
-    Route::get('get-detailspayslip', [PayrollController::class, 'detailspayslip']);
+    Route::post('create-payslip', [PayrollController::class, 'store'])->middleware('permission:payroll,write');
+    Route::get('get-payslip', [PayrollController::class, 'index'])->middleware('permission:payroll,read');
+    Route::get('get-detailspayslip', [PayrollController::class, 'detailspayslip'])->middleware('permission:payroll,read');
+    Route::get('payroll-summary', [PayrollController::class, 'summary'])->middleware('permission:payroll,read');
+    Route::post('generate-payroll-manual', [PayrollController::class, 'generateManual'])->middleware('permission:payroll,write');
+    Route::post('payroll/{payroll}/approve', [PayrollController::class, 'approve'])->middleware('permission:payroll,full');
+    Route::post('payroll/{payroll}/reject', [PayrollController::class, 'reject'])->middleware('permission:payroll,full');
+    Route::post('payrolls/bulk-status', [PayrollController::class, 'bulkStatus'])->middleware('permission:payroll,write');
+    Route::patch('payrolls/{payroll}/status', [PayrollController::class, 'updateStatus'])->middleware('permission:payroll,write');
 
     Route::get('/payments/pending', [InvoiceController::class, 'pendingPayments'])->middleware('permission:payments,read');
     Route::post('/payment/approve/{id}', [InvoiceController::class, 'approvePayment'])->middleware('permission:payments,write');

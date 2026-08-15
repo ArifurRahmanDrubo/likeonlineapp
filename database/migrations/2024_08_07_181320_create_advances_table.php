@@ -4,8 +4,7 @@ use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 
-return new class extends Migration
-{
+return new class extends Migration {
     /**
      * Run the migrations.
      */
@@ -13,14 +12,24 @@ return new class extends Migration
     {
         Schema::create('advances', function (Blueprint $table) {
             $table->id();
-            $table->unsignedBigInteger('employee_id');
-            $table->decimal('amount', 10, 2); // Amount of the advance
-            $table->string('date'); // Date of the advance
-            $table->text('notes')->nullable(); // Reason for the advance
-            $table->timestamps();
 
-            // Foreign key constraint (assuming you have an 'employees' table)
-            $table->foreign('employee_id')->references('id')->on('employees')->onDelete('cascade');
+            $table->foreignId('employee_id')
+                ->constrained('employees')
+                ->cascadeOnDelete();
+
+            $table->decimal('amount', 10, 2);
+
+            $table->decimal('total_amount', 10, 2);
+            $table->decimal('monthly_installment', 10, 2);
+            $table->decimal('paid_amount', 10, 2)->default(0);
+            $table->decimal('remaining_amount', 10, 2);
+
+            $table->date('date');
+            $table->text('notes')->nullable();
+
+            $table->string('status')->default('active');
+
+            $table->timestamps();
         });
     }
 
