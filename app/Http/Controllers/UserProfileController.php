@@ -23,6 +23,7 @@ class UserProfileController extends Controller
     public function UserProfile(Request $request)
     {
         $data = $request->all();
+        $user = Auth::user();
         $userId = Auth::id();
 
         // Check if user profile exists
@@ -40,13 +41,21 @@ class UserProfileController extends Controller
         if ($userProfile) {
             // Update existing profile
             $userProfile->update($data);
-            return response()->json(['message' => 'Profile updated successfully']);
+            $message = 'Profile updated successfully';
         } else {
             // Create new profile
             $data['user_id'] = $userId;
             UserProfile::create($data);
-            return response()->json(['message' => 'Profile created successfully']);
+            $message = 'Profile created successfully';
         }
+
+        // Return the fresh user (with profile) so the SPA can sync it into
+        // Pinia/localStorage via authStore.updateProfileData() — no full
+        // refresh request needed.
+        return response()->json([
+            'message' => $message,
+            'user' => $user->fresh()->load('profile'),
+        ]);
     }
     public function Userdelete(Request $request)
     {

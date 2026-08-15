@@ -246,7 +246,21 @@ public function clientList(Request $request)
             $user = Auth::user();
             $token = $user->createToken('auth_token')->plainTextToken;
 
-            return response()->json(['access_token' => $token, 'token_type' => 'Bearer', 'message' => ' Login Successful', 'status' => 'success']);
+            // Include the user's profile (avatar etc.) so the SPA can render
+            // the topbar/profile views without a secondary /api/user-profile call.
+            $user->load('profile');
+
+            // Return the user + permissions in the same response so the SPA
+            // can hydrate its Pinia store without a secondary API call.
+            return response()->json([
+                'access_token' => $token,
+                'token_type' => 'Bearer',
+                'message' => ' Login Successful',
+                'status' => 'success',
+                'user' => $user,
+                'role' => $user->role ? $user->role->name : null,
+                'permissions' => $user->role ? $user->role->permissions()->select('name', 'type', 'module')->get() : [],
+            ]);
         } catch (Exception $e) {
             return response()->json(['message' => $e->getMessage()], 500);
         }

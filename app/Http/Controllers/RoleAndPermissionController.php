@@ -14,6 +14,7 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\Validator;
+use Laravel\Sanctum\PersonalAccessToken;
 
 class RoleAndPermissionController extends Controller
 {
@@ -188,9 +189,6 @@ class RoleAndPermissionController extends Controller
 
     public function createOrupdatePermission(Request $request)
     {
-        // Log the incoming request data for debugging
-
-
         // Validate request
         $validated = $request->validate([
             'permissions' => 'required|json',
@@ -201,15 +199,6 @@ class RoleAndPermissionController extends Controller
         $role = CustomRole::find($validated['role_id']);
         if (!$role) {
             return response()->json(['message' => 'Role not found.'], 404);
-        }
-        $role->permissions()->detach();
-
-        // Step 2: Optionally, delete permissions that are no longer associated with any role
-        $permissions = CustomPermission::whereDoesntHave('roles')->get();
-
-        // Delete the permissions
-        foreach ($permissions as $permission) {
-            $permission->delete();
         }
 
         // Get the user
@@ -223,86 +212,133 @@ class RoleAndPermissionController extends Controller
             return response()->json(['message' => 'Invalid permissions data format.'], 400);
         }
 
-        // Process permissions
+        // Process permissions — reuse existing rows (name is unique) instead of
+        // re-creating duplicates on every save.
+        $permissionIds = [];
         foreach ($permissionsData as $permission) {
             // Validate individual permission structure
             if (!isset($permission['value'])) {
                 return response()->json(['message' => 'Invalid permission data.'], 400);
             }
             $permissionType = $permission['permission_type'] ?? 'full';
-            // Create parent permission
-            $parent = CustomPermission::create([
-                'name' => $permission['value'],
-                'guard_name' => 'web',
-                'module' => 'parent',
-                'type' => $permissionType, // Default type for top-level permissions
-                'parent_id' => null,
-                'created_by' => $user->name,
-            ]);
-            $role->permissions()->attach($parent->id);
+            // Create/reuse the parent permission
+            $parent = CustomPermission::updateOrCreate(
+                ['name' => $permission['value']],
+                [
+                    'guard_name' => 'web',
+                    'module' => 'parent',
+                    'type' => $permissionType, // Default type for top-level permissions
+                    'parent_id' => null,
+                    'created_by' => $user->name,
+                ]
+            );
+            $permissionIds[] = $parent->id;
 
             // Handle modules directly under the parent
             if (isset($permission['modules'])) {
-                $this->storeModules($permission['modules'], $parent->id, $user, $role);
+                $this->storeModules($permission['modules'], $parent->id, $user, $permissionIds);
             }
 
             // Recursively store child permissions if they exist
             if (isset($permission['children'])) {
-                $this->storeChildPermissions($permission['children'], $parent->id, $user, $role);
+                $this->storeChildPermissions($permission['children'], $parent->id, $user, $permissionIds);
             }
         }
+
+        // Rebuild the role's permission set with exactly these permissions
+        // (sync() removes stale pivots and never creates duplicate entries)
+        $role->permissions()->sync($permissionIds);
+
+        // Clean up permission rows that are no longer assigned to any role
+        CustomPermission::whereDoesntHave('roles')->delete();
+
+        // The role's permission set changed, so every user holding this role
+        // must log in again to pick up the new permissions. Their old tokens
+        // are revoked, and the frontend 401 interceptor redirects to /login.
+        $this->revokeTokensForRole($role);
 
         return response()->json(['message' => 'Permissions stored successfully.'], 200);
     }
 
-    private function storeChildPermissions(array $children, $parentId, $user, $role)
+    private function storeChildPermissions(array $children, $parentId, $user, array &$permissionIds)
     {
         foreach ($children as $child) {
             $childType = $child['permission_type'] ?? 'full';
-            $childPermission = CustomPermission::create([
-                'name' => $child['value'],
-                'guard_name' => 'web',
-                'module' => 'child',
-                'type' => $childType,
-                'parent_id' => $parentId,
-                'created_by' => $user->name,
-            ]);
-            $role->permissions()->attach($childPermission->id);
+            $childPermission = CustomPermission::updateOrCreate(
+                ['name' => $child['value']],
+                [
+                    'guard_name' => 'web',
+                    'module' => 'child',
+                    'type' => $childType,
+                    'parent_id' => $parentId,
+                    'created_by' => $user->name,
+                ]
+            );
+            $permissionIds[] = $childPermission->id;
             // Handle child modules
             if (isset($child['childmodules'])) {
-                $this->storeChildModules($child['childmodules'], $childPermission->id, $user, $role);
+                $this->storeChildModules($child['childmodules'], $childPermission->id, $user, $permissionIds);
             }
         }
     }
-    private function storeModules(array $modules, $parentId, $user, $role)
+    private function storeModules(array $modules, $parentId, $user, array &$permissionIds)
     {
         foreach ($modules as $module) {
             $moduleType = $module['permission_type'] ?? 'full';
-            $modulePermission = CustomPermission::create([
-                'name' => $module['value'],
-                'guard_name' => 'web',
-                'module' => 'module',
-                'type' => $moduleType,
-                'parent_id' => $parentId,
-                'created_by' => $user->name,
-            ]);
-            $role->permissions()->attach($modulePermission->id);
+            $modulePermission = CustomPermission::updateOrCreate(
+                ['name' => $module['value']],
+                [
+                    'guard_name' => 'web',
+                    'module' => 'module',
+                    'type' => $moduleType,
+                    'parent_id' => $parentId,
+                    'created_by' => $user->name,
+                ]
+            );
+            $permissionIds[] = $modulePermission->id;
         }
     }
-    private function storeChildModules(array $childmodules, $childPermissionId, $user, $role)
+    private function storeChildModules(array $childmodules, $childPermissionId, $user, array &$permissionIds)
     {
         foreach ($childmodules as $childmodule) {
             $childmoduleType = $childmodule['permission_type'] ?? 'full';
-            $childmodulePermission = CustomPermission::create([
-                'name' => $childmodule['value'],
-                'guard_name' => 'web',
-                'module' => 'childmodule',
-                'type' => $childmoduleType, // Assuming 'module' type for modules
-                'parent_id' => $childPermissionId,
-                'created_by' => $user->name,
-            ]);
-            $role->permissions()->attach($childmodulePermission->id);
+            $childmodulePermission = CustomPermission::updateOrCreate(
+                ['name' => $childmodule['value']],
+                [
+                    'guard_name' => 'web',
+                    'module' => 'childmodule',
+                    'type' => $childmoduleType, // Assuming 'module' type for modules
+                    'parent_id' => $childPermissionId,
+                    'created_by' => $user->name,
+                ]
+            );
+            $permissionIds[] = $childmodulePermission->id;
         }
+    }
+
+    /**
+     * Revoke every active token of every user assigned to the given role.
+     * Called whenever a role's permission set changes so affected users are
+     * forced to log in again with the updated permissions.
+     */
+    private function revokeTokensForRole(CustomRole $role)
+    {
+        $this->revokeTokensForUsers($role->users()->pluck('users.id'));
+    }
+
+    /**
+     * Bulk-delete Sanctum tokens for the given user ids.
+     */
+    private function revokeTokensForUsers($userIds)
+    {
+        $userIds = collect($userIds)->filter()->unique()->values();
+        if ($userIds->isEmpty()) {
+            return;
+        }
+
+        PersonalAccessToken::where('tokenable_type', User::class)
+            ->whereIn('tokenable_id', $userIds)
+            ->delete();
     }
 
 
@@ -322,6 +358,15 @@ class RoleAndPermissionController extends Controller
                 'status' => $request->input('status'),
                 'created_by' =>  $user->role->name,
             ]);
+
+            // The permission name changed, so every user whose roles include
+            // this permission must log in again to refresh their cached names.
+            $roleIds = $permission->roles()->pluck('roles.id');
+            $userIds = CustomRole::whereIn('id', $roleIds)->get()->flatMap(function ($role) {
+                return $role->users()->pluck('users.id');
+            });
+            $this->revokeTokensForUsers($userIds);
+
             return response()->json([
                 'message' => ' Permission update Successfull'
             ]);
@@ -359,8 +404,9 @@ class RoleAndPermissionController extends Controller
                     $permission->delete();
                 }
 
-                // Step 3: Optionally, delete the role itself
-                // $role->delete();
+                // Step 3: The role lost its permissions, so every user holding
+                // this role must log in again to pick up the change.
+                $this->revokeTokensForRole($role);
 
                 return response()->json(['message' => 'Permissions detached and deleted successfully.']);
             } else {
@@ -390,6 +436,11 @@ class RoleAndPermissionController extends Controller
 
         if ($role) {
             $role->permissions()->detach($permissionId);
+
+            // The role's permission set changed, so every user holding this
+            // role must log in again to pick up the change.
+            $this->revokeTokensForRole($role);
+
             return response()->json(['message' => 'Permission removed successfully.']);
         }
 
@@ -450,28 +501,28 @@ class RoleAndPermissionController extends Controller
                 'role' => 'required|string|exists:roles,name', // Role must exist
             ]);
 
+            $attributes = [
+                'name' => $request->input('name'),
+                'email' => $request->input('email'),
+                'mobile' => $request->input('mobile'),
+                'status' => $request->input('status'),
+            ];
             if ($request->input('password')) {
-                $user = $user->update([
-                    'name' => $request->input('name'),
-                    'email' => $request->input('email'),
-                    'mobile' => $request->input('mobile'),
-                    'status' => $request->input('status'),
-                    'password' => Hash::make($request->input('password')),
-                ]);
-            } else {
-                $user = $user->update([
-                    'name' => $request->input('name'),
-                    'email' => $request->input('email'),
-                    'mobile' => $request->input('mobile'),
-                    'status' => $request->input('status'),
-                ]);
+                $attributes['password'] = Hash::make($request->input('password'));
             }
+            $user->update($attributes);
 
             $role = CustomRole::where('name', $request->input('role'))->first();
             if (!$role) {
                 return response()->json(['message' => 'Role not found'], 404);
             }
             $user->role()->associate($role);
+            $user->save();
+
+            // Revoke all of the user's tokens so they must log in again with
+            // their updated role/permissions.
+            $user->tokens()->delete();
+
             return response()->json([
                 'message' => ' Users Updated Successfull'
             ]);
@@ -625,22 +676,21 @@ class RoleAndPermissionController extends Controller
         // Retrieve all users with their roles and permissions
         try {
             $request->validate([
-                'role' => 'required|string|exists:roles,id', // Role must exist
+                'role' => 'required|exists:roles,id', // Role must exist
             ]);
             $id = $request->input('user_id');
             $user = User::findOrFail($id);
-            $role = CustomRole::findOrFail($id);
-            if ($user) {
-                $user->role()->delete;
-                $user->role()->associate($role);
-                return response()->json([
-                    'message' => 'Role Assigned Successfully',
-                ]);
-            } else {
-                return response()->json([
-                    'message' => 'user not found',
-                ]);
-            }
+            $role = CustomRole::findOrFail($request->input('role'));
+            $user->role()->associate($role);
+            $user->save();
+
+            // Revoke all of the user's tokens so they must log in again with
+            // their new role.
+            $user->tokens()->delete();
+
+            return response()->json([
+                'message' => 'Role Assigned Successfully',
+            ]);
         } catch (Exception $e) {
             return response()->json([
                 'message' => $e->getMessage(),

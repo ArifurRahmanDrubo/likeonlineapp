@@ -188,11 +188,11 @@ Route::middleware(['auth:sanctum'])->group(function () {
     Route::post('positions/delete-multiple', [PositionController::class, 'deleteMultiple'])->middleware('permission:position,full');
 
     //MacResseler
-    Route::get('get-mackpackage', [MackpackageController::class, 'index'])->middleware('permission:macpackage,read');
-    Route::post('update-mackpackage', [MackpackageController::class, 'update'])->middleware('permission:macpackage,write');
-    Route::post('create-mackpackage', [MackpackageController::class, 'store'])->middleware('permission:macpackage,write');
-    Route::post('delete-mackpackage', [MackpackageController::class, 'destroy'])->middleware('permission:macpackage,full');
-    Route::post('mackpackage/delete-multiple', [MackpackageController::class, 'deleteMultiple'])->middleware('permission:macpackage,full');
+    Route::get('get-mackpackage', [MackpackageController::class, 'index'])->middleware('permission:mac_package,read');
+    Route::post('update-mackpackage', [MackpackageController::class, 'update'])->middleware('permission:mac_package,write');
+    Route::post('create-mackpackage', [MackpackageController::class, 'store'])->middleware('permission:mac_package,write');
+    Route::post('delete-mackpackage', [MackpackageController::class, 'destroy'])->middleware('permission:mac_package,full');
+    Route::post('mackpackage/delete-multiple', [MackpackageController::class, 'deleteMultiple'])->middleware('permission:mac_package,full');
     Route::post('tariffs', [TariffController::class, 'store'])->middleware('permission:tariff,write');
     Route::get('tariffs', [TariffController::class, 'index'])->middleware('permission:tariff,read');
     Route::post('getTariffByid', [TariffController::class, 'getTariffByid'])->middleware('permission:tariff,write');
@@ -223,12 +223,12 @@ Route::middleware(['auth:sanctum'])->group(function () {
     Route::post('delete-PPPOEIpPool', [PppoeProfile::class, 'deletePppoeIppool']);
     Route::get('getProfile-mikrotikserver', [MikroTikController::class, 'getPppoeProfiles']);
     Route::post('mikrotikserver/delete-multiple', [MikroTikController::class, 'deleteMultiple'])->middleware('permission:mikrotik_server,full');
-    Route::get('get-MacReseller', [MacResellerController::class, 'index'])->middleware('permission:macreseller,read');
-    Route::post('create-MacReseller', [MacResellerController::class, 'store'])->middleware('permission:macreseller,rwrite');
-    Route::post('update-MacReseller', [MacResellerController::class, 'updateMacReseller'])->middleware('permission:macreseller,write');
-    Route::post('delete-MacReseller', [MacResellerController::class, 'destroy'])->middleware('permission:macreseller,rfull');
-    Route::post('updateResellerType', [MacResellerController::class, 'updateResellerType'])->middleware('permission:macreseller,write');
-    Route::get('getMacResellerbyId', [MacResellerController::class, 'getMacResellerbyId'])->middleware('permission:macreseller,write');
+    Route::get('get-MacReseller', [MacResellerController::class, 'index'])->middleware('permission:mac_reseller,read');
+    Route::post('create-MacReseller', [MacResellerController::class, 'store'])->middleware('permission:mac_reseller,rwrite');
+    Route::post('update-MacReseller', [MacResellerController::class, 'updateMacReseller'])->middleware('permission:mac_reseller,write');
+    Route::post('delete-MacReseller', [MacResellerController::class, 'destroy'])->middleware('permission:mac_reseller,rfull');
+    Route::post('updateResellerType', [MacResellerController::class, 'updateResellerType'])->middleware('permission:mac_reseller,write');
+    Route::get('getMacResellerbyId', [MacResellerController::class, 'getMacResellerbyId'])->middleware('permission:mac_reseller,write');
     Route::get('getMacResellerAllDatabyId', [MacResellerController::class, 'getMacResellerAllDatabyId']);
     Route::get('get-mac-reseller/{id}', [MacResellerController::class, 'getMacReseller']);
 

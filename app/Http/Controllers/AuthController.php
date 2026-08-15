@@ -51,33 +51,40 @@ class AuthController extends Controller
                     'status' => 'Not Assigned',
                     'created_by' => '', // Set created_by to the user ID
                 ]);
-                $parent = CustomPermission::create([
-                    'name' => 'client',
-                    'guard_name' => 'web',
-                    'module' => 'parent',
-                    'type' => 'read', // Default type for top-level permissions
-                    'parent_id' => null,
-                    'created_by' => 'System',
-                ]);
-                $role->permissions()->attach($parent->id);
-                $permission = CustomPermission::create([
-                    'name' => 'client_profile',
-                    'guard_name' => 'web',
-                    'module' => 'child',
-                    'type' => 'read', // Default type for top-level permissions
-                    'parent_id' => $parent->id,
-                    'created_by' => 'System',
-                ]);
-                $permission1 = CustomPermission::create([
-                    'name' => 'new_request',
-                    'guard_name' => 'web',
-                    'module' => 'child',
-                    'type' => 'read', // Default type for top-level permissions
-                    'parent_id' => $parent->id,
-                    'created_by' => 'System',
-                ]);
-                $role->permissions()->attach($permission->id);
-                $role->permissions()->attach($permission1->id);
+                // Use firstOrCreate so repeated registrations reuse the same
+                // permission rows (permissions.name is unique).
+                $parent = CustomPermission::firstOrCreate(
+                    ['name' => 'client'],
+                    [
+                        'guard_name' => 'web',
+                        'module' => 'parent',
+                        'type' => 'read', // Default type for top-level permissions
+                        'parent_id' => null,
+                        'created_by' => 'System',
+                    ]
+                );
+                $permission = CustomPermission::firstOrCreate(
+                    ['name' => 'client_profile'],
+                    [
+                        'guard_name' => 'web',
+                        'module' => 'child',
+                        'type' => 'read', // Default type for top-level permissions
+                        'parent_id' => $parent->id,
+                        'created_by' => 'System',
+                    ]
+                );
+                $permission1 = CustomPermission::firstOrCreate(
+                    ['name' => 'new_request'],
+                    [
+                        'guard_name' => 'web',
+                        'module' => 'child',
+                        'type' => 'read', // Default type for top-level permissions
+                        'parent_id' => $parent->id,
+                        'created_by' => 'System',
+                    ]
+                );
+                // Attach without detaching so existing client-role permissions are kept
+                $role->permissions()->syncWithoutDetaching([$parent->id, $permission->id, $permission1->id]);
 
                 $user->role()->associate($role);
                 $user->save();
@@ -200,7 +207,18 @@ class AuthController extends Controller
             User::where('email', '=', $email)->update(['otp' => '0']);
 
             $token = $user->createToken('authToken')->plainTextToken;
-            return response()->json(['status' => 'success', 'access_token' => $token, 'token_type' => 'Bearer', 'message' => ' OTP Verification Successful']);
+            // Include the user's profile so the SPA can render the topbar
+            // without a secondary /api/user-profile call.
+            $user->load('profile');
+            return response()->json([
+                'status' => 'success',
+                'access_token' => $token,
+                'token_type' => 'Bearer',
+                'message' => ' OTP Verification Successful',
+                'user' => $user,
+                'role' => $user->role ? $user->role->name : null,
+                'permissions' => $user->role ? $user->role->permissions()->select('name', 'type', 'module')->get() : [],
+            ]);
         } catch (Exception $e) {
             return response()->json(['status' => 'fail', 'message' => $e->getMessage()]);
         }
