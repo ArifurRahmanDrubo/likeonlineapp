@@ -18,3 +18,9 @@ if (!function_exists('cloudinary_delete')) {
         return CloudinaryService::delete($publicId);
     }
 }
+
+function isValidBangladeshiNumber($number)
+{
+    return preg_match('/^(?:\+?88)?01[3-9]\d{8}$/', $number);
+}
+

@@ -8,8 +8,5 @@ use Illuminate\Database\Eloquent\Model;
 class ResignRule extends Model
 {
     use HasFactory;
-    protected $fillable = [
-        'resignrule',
-        'details',
-    ];
+    protected $guarded = [];
 }

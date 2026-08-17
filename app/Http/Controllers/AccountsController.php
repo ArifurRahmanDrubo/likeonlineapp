@@ -20,8 +20,10 @@ class AccountsController extends Controller
         $fromDate = $now->startOfMonth()->format('Y-m-d');  // Start of the current month
         $toDate = $now->format('Y-m-d');  // Current date
 
-        // Sum of received payments from the start of the month to the current date
+        // Sum of received payments from the start of the month to the current
+        // date — approved payments only (pending / rejected are not collection).
         $collected_bill = Payment::whereHas('customer')
+            ->where('approval_status', 'approved')
             ->whereBetween('recieved_date', [$fromDate, $toDate])
             ->sum('received_amount');
 

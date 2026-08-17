@@ -8,5 +8,10 @@ use Illuminate\Database\Eloquent\Model;
 class InvoiceSetup extends Model
 {
     use HasFactory;
-  protected $guarded = []; 
+
+    // The migration creates the singular table name `invoice_setup` — Eloquent
+    // would otherwise pluralize it to `invoice_setups` and every query fails.
+    protected $table = 'invoice_setup';
+
+    protected $guarded = []; 
 }

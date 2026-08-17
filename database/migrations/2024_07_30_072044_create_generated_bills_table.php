@@ -19,9 +19,10 @@ return new class extends Migration
             $table->string('speed');
             $table->decimal('amount', 8, 2);
             $table->string('generated_at');
+            $table->decimal('paid_amount', 10, 2)->default(0);
+            $table->timestamp('paid_at')->nullable();
             $table->string('status')->default('unpaid');
             $table->timestamps();
-
             $table->foreign('customer_id')->references('id')->on('customers')->onDelete('cascade');
         });
     }

@@ -15,8 +15,9 @@ class ReportController extends Controller
         // Get the current date
         $currentDate = Carbon::now()->toDateString();
 
-        // Fetch daily payments with customer details
+        // Fetch all approved payments with customer details
         $dailyPayments = Payment::with(['customer.invoice', 'creator:id,name', 'approver:id,name'])
+            ->where('approval_status', 'approved')
             ->get();
 
         // Return data as JSON response
@@ -112,6 +113,9 @@ class ReportController extends Controller
             // Build query
             $query = Payment::with(['customer.invoice', 'creator:id,name', 'approver:id,name']);
 
+            // Approved payments only — pending / rejected money is not collection.
+            $query->where('approval_status', 'approved');
+
             if ($request->filled('userId')) {
                 $query->where('customer_id', $request->input('userId'));
             }
@@ -156,6 +160,7 @@ class ReportController extends Controller
         try {
             // Build query to get all payments with a discount value
             $paymentData = Payment::with(['customer.invoice', 'creator:id,name', 'approver:id,name'])
+                ->where('approval_status', 'approved')
                 ->whereNotNull('discount')
                 ->where('discount', '>', 0)
                 ->get();

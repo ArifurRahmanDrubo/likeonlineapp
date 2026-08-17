@@ -20,6 +20,19 @@ use Illuminate\Validation\ValidationException;
 
 class AuthController extends Controller
 {
+    /**
+     * Customer portal registration.
+     *
+     * Registration is restricted to existing ISP subscribers ONLY:
+     *   1. The customer must match an active record in `customers` by their
+     *      ISP-provided PPPoE username + password.
+     *   2. The customer must not be left/suspended.
+     *   3. The customer must not already have a portal account
+     *      (customers.user_id must be NULL).
+     *
+     * The customer row is locked (lockForUpdate) so two concurrent requests
+     * can never both pass the "already registered" check and double-bind.
+     */
     public function register(Request $request)
     {
         try {
@@ -28,73 +41,168 @@ class AuthController extends Controller
                 'email' => 'required|string|email|max:255|unique:users',
                 'password' => 'required|string|min:8',
                 'mobile' => 'required',
+                'ispusername' => 'required|string',
+                'isppassword' => 'required|string',
             ]);
-            $ispusername = $request->input('ispusername');
-            $isppassword = $request->input('isppassword');
+            $ispusername = trim((string) $request->input('ispusername'));
+            $isppassword = (string) $request->input('isppassword');
 
-            $customer = Customer::where('username', $ispusername)->where('password', $isppassword)->first();
-            if ($customer) {
-                DB::beginTransaction();
+            // Lock the customer row for the whole verification + binding flow
+            // so a parallel registration cannot slip past the user_id check.
+            $customer = Customer::where('username', $ispusername)
+                ->where('password', $isppassword)
+                ->lockForUpdate()
+                ->first();
 
-                $user = User::create([
-                    'name' => $request->input('name'),
-                    'email' => $request->input('email'),
-                    'mobile' => $request->input('mobile'),
-                    'password' => Hash::make($request->password),
-                ]);
-                $customer->update([
-                    'user_id' => $user->id,
-                ]);
-                $role = CustomRole::firstOrCreate([
-                    'name' => 'client',
-                    'guard_name' => 'sanctum',
-                    'status' => 'Not Assigned',
-                    'created_by' => '', // Set created_by to the user ID
-                ]);
-                // Use firstOrCreate so repeated registrations reuse the same
-                // permission rows (permissions.name is unique).
-                $parent = CustomPermission::firstOrCreate(
-                    ['name' => 'client'],
-                    [
-                        'guard_name' => 'web',
-                        'module' => 'parent',
-                        'type' => 'read', // Default type for top-level permissions
-                        'parent_id' => null,
-                        'created_by' => 'System',
-                    ]
-                );
-                $permission = CustomPermission::firstOrCreate(
-                    ['name' => 'client_profile'],
-                    [
-                        'guard_name' => 'web',
-                        'module' => 'child',
-                        'type' => 'read', // Default type for top-level permissions
-                        'parent_id' => $parent->id,
-                        'created_by' => 'System',
-                    ]
-                );
-                $permission1 = CustomPermission::firstOrCreate(
-                    ['name' => 'new_request'],
-                    [
-                        'guard_name' => 'web',
-                        'module' => 'child',
-                        'type' => 'read', // Default type for top-level permissions
-                        'parent_id' => $parent->id,
-                        'created_by' => 'System',
-                    ]
-                );
-                // Attach without detaching so existing client-role permissions are kept
-                $role->permissions()->syncWithoutDetaching([$parent->id, $permission->id, $permission1->id]);
-
-                $user->role()->associate($role);
-                $user->save();
-
-                DB::commit();
-
-                return response()->json(['message' => 'User registered successfully!']);
-            } else {
-                return response()->json(['status' => 'fail', 'message' => 'Please Enter Your ISP Provided username & password'], 201);
+            // 1. No matching ISP subscriber -> block registration.
+            if (!$customer) {
+                return response()->json([
+                    'status' => 'fail',
+                    'message' => 'Invalid ISP credentials. Only active ISP subscribers are allowed to register.',
+                ], 422);
             }
+
+            // 2. Inactive / suspended subscriber -> block registration.
+            if (in_array($customer->status, ['left', 'suspended'], true)) {
+                return response()->json([
+                    'status' => 'fail',
+                    'message' => 'Account is inactive or suspended. Please contact ISP support.',
+                ], 403);
+            }
+
+            // 3. Already registered -> direct to login / password reset.
+            if ($customer->user_id) {
+                return response()->json([
+                    'status' => 'fail',
+                    'message' => 'Account is already registered. Please proceed to Login or Reset Password.',
+                ], 409);
+            }
+
+            // 4. Valid & unregistered -> create the portal account and bind it.
+            DB::beginTransaction();
+
+            $user = User::create([
+                'name' => $request->input('name'),
+                'email' => $request->input('email'),
+                'mobile' => $request->input('mobile'),
+                'password' => Hash::make($request->password),
+            ]);
+            $customer->update([
+                'user_id' => $user->id,
+            ]);
+            $role = CustomRole::firstOrCreate([
+                'name' => 'client',
+                'guard_name' => 'sanctum',
+                'status' => 'Not Assigned',
+                'created_by' => '', // Set created_by to the user ID
+            ]);
+            // Use firstOrCreate so repeated registrations reuse the same
+            // permission rows (permissions.name is unique).
+            $parent = CustomPermission::firstOrCreate(
+                ['name' => 'client'],
+                [
+                    'guard_name' => 'web',
+                    'module' => 'parent',
+                    'type' => 'read', // Default type for top-level permissions
+                    'parent_id' => null,
+                    'created_by' => 'System',
+                ]
+            );
+            $permission = CustomPermission::firstOrCreate(
+                ['name' => 'client_profile'],
+                [
+                    'guard_name' => 'web',
+                    'module' => 'child',
+                    'type' => 'read', // Default type for top-level permissions
+                    'parent_id' => $parent->id,
+                    'created_by' => 'System',
+                ]
+            );
+            $permission1 = CustomPermission::firstOrCreate(
+                ['name' => 'new_request'],
+                [
+                    'guard_name' => 'web',
+                    'module' => 'child',
+                    'type' => 'read', // Default type for top-level permissions
+                    'parent_id' => $parent->id,
+                    'created_by' => 'System',
+                ]
+            );
+            // Attach without detaching so existing client-role permissions are kept
+            $role->permissions()->syncWithoutDetaching([$parent->id, $permission->id, $permission1->id]);
+
+            $user->role()->associate($role);
+            $user->save();
+
+            DB::commit();
+
+            return response()->json(['message' => 'User registered successfully!', 'status' => 'success']);
+        } catch (ValidationException $e) {
+            return response()->json(['status' => 'fail', 'message' => $e->errors()], 422);
+        } catch (Exception $e) {
+            return response()->json(['status' => 'fail', 'message' => 'An error occurred. Please try again.'], 500);
+        }
+    }
+
+    /**
+     * Dedicated customer portal login.
+     *
+     * Authenticates via the portal account's email OR the ISP PPPoE username,
+     * then verifies the account actually holds the `client` role and is bound
+     * to a Customer record — non-client accounts cannot enter the portal.
+     */
+    public function customerLogin(Request $request)
+    {
+        try {
+            $request->validate([
+                'email' => 'required|string',
+                'password' => 'required|string',
+            ]);
+
+            $identifier = trim((string) $request->input('email'));
+
+            // Resolve the user by email first, then by the ISP PPPoE username
+            // (customers.username -> customers.user_id -> users).
+            $user = User::where('email', $identifier)->first();
+            if (!$user) {
+                $customer = Customer::where('username', $identifier)
+                    ->whereNotNull('user_id')
+                    ->first();
+                $user = $customer?->user;
+            }
+
+            if (!$user || !Hash::check((string) $request->input('password'), $user->password)) {
+                return response()->json([
+                    'status' => 'fail',
+                    'message' => 'The provided credentials are incorrect.',
+                ], 401);
+            }
+
+            // Portal access requires the client role AND a bound customer record.
+            $isClient = $user->role && strtolower($user->role->name) === 'client';
+            $hasCustomer = Customer::where('user_id', $user->id)->exists();
+            if (!$isClient || !$hasCustomer) {
+                return response()->json([
+                    'status' => 'fail',
+                    'message' => 'This account is not authorized to access the customer portal.',
+                ], 403);
+            }
+
+            $token = $user->createToken('portal_token')->plainTextToken;
+
+            // Same payload shape as the admin login so the SPA can hydrate its
+            // Pinia auth store from a single response.
+            return response()->json([
+                'access_token' => $token,
+                'token_type' => 'Bearer',
+                'message' => 'Login Successful',
+                'status' => 'success',
+                'user' => $user->load('profile'),
+                'role' => $user->role->name,
+                'permissions' => $user->role->permissions()->select('name', 'type', 'module')->get(),
+            ]);
+        } catch (ValidationException $e) {
+            return response()->json(['status' => 'fail', 'message' => $e->errors()], 422);
         } catch (Exception $e) {
             return response()->json(['status' => 'fail', 'message' => 'An error occurred. Please try again.'], 500);
         }

@@ -15,15 +15,11 @@ return new class extends Migration
             $table->id();
             $table->unsignedBigInteger('customer_id');
             $table->decimal('amount', 8, 2);
-            $table->string('billing_month');
             $table->decimal('discount', 8, 2)->default(0);
-            $table->decimal('received_amount', 8, 2)->default(0);
             $table->decimal('advance', 8, 2)->default(0);
-            $table->string('transaction_no')->nullable();
-            $table->text('notes')->nullable();
+            $table->decimal('due_amount', 8, 2)->default(0);
             $table->enum('status', ['paid', 'unpaid', 'partial'])->default('unpaid');
             $table->boolean('pending_mikrotik_sync')->default(false);
-     
             $table->foreign('customer_id')->references('id')->on('customers')->onDelete('cascade');
             $table->timestamps();
         });

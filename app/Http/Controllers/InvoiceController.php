@@ -265,6 +265,14 @@ class InvoiceController extends Controller
             $date = Carbon::parse($recievedate);
             $formattedDate = $date->format('Y-m-d');
 
+            // Reject duplicate TrxID submissions — the same transaction must
+            // never be queued twice (which would double-settle on approval).
+            if ($transactionno && Payment::where('transaction_no', $transactionno)->exists()) {
+                return response()->json([
+                    'error' => 'This transaction ID (TrxID) has already been submitted. Please check and try again.',
+                ], 422);
+            }
+
             $payment_id = 'PAY-' . time() . rand(100, 999);
 
             // পেমেন্ট রেকর্ড শুধুমাত্র Pending অবস্থায় সেভ হবে
@@ -429,81 +437,113 @@ public function pendingPayments()
     {
         $customer_id = $payment->customer_id;
 
-        // Lock ALL open invoices for this customer so concurrent
-        // approvals never read stale balances (FIFO settlement).
-        $invoices = Invoice::where('customer_id', $customer_id)
-            ->whereIn('status', ['unpaid', 'partial'])
-            ->orderBy('id')
+        // Lock ALL open generated_bills for this customer so concurrent
+        // approvals never read stale balances (FIFO settlement). This mirrors
+        // the online payment engine (PaymentSettlementService) so manual and
+        // gateway payments settle the exact same way.
+        $unpaidBills = GeneratedBill::where('customer_id', $customer_id)
+            ->whereIn('status', ['unpaid', 'partially_paid'])
+            ->orderBy('id', 'asc')
             ->lockForUpdate()
             ->get();
 
-        if ($invoices->isEmpty() && !Invoice::where('customer_id', $customer_id)->exists()) {
+        if ($unpaidBills->isEmpty() && !Invoice::where('customer_id', $customer_id)->exists()) {
             throw new \Exception('Invoice not found for this customer.');
         }
 
         // Total payment being settled: received amount + discount granted.
-        // (invoices.amount IS the running due balance in this app — it
-        // plays the role of due_amount, so no separate column is needed.)
         $paymentAmount = (float) $payment->received_amount + (float) $payment->discount;
+        $remaining = $paymentAmount;
+        $advanceCredit = 0.0;
+        // Human-readable settlement log — stored in payments.payment_info.
+        $settledLog = [];
+        // billing_month of the first bill actually settled / partially settled
+        // — stored in payments.billing_month (NULL when only the Previous Due
+        // was cleared).
+        $settledBillMonth = null;
 
-        // FIFO: apply the payment to the oldest open invoices first.
-        $lastInvoice = null;
-        foreach ($invoices as $invoice) {
-            $due = (float) $invoice->amount;
-            if ($paymentAmount >= $due) {
-                // Payment covers this invoice in full.
-                $paymentAmount -= $due;
-                $invoice->amount = 0;
-                $invoice->status = 'paid';
-            } else {
-                // Partial payment — deduct what remains and mark Partial.
-                $invoice->amount = $due - $paymentAmount;
-                $invoice->status = 'partial';
-                $paymentAmount = 0;
-            }
-            $lastInvoice = $invoice;
-            $invoice->save();
+        $ledger = Invoice::where('customer_id', $customer_id)->lockForUpdate()->first();
 
-            if ($paymentAmount <= 0) {
+        // ---- Step 1: settle the Previous Due first ---------------------------
+        // previous_due = ledger due not covered by the itemized open bills.
+        $openBillsDue = $unpaidBills->sum(fn ($bill) => (float) $bill->amount - (float) $bill->paid_amount);
+        $previousDue = $ledger ? max(0, (float) $ledger->due_amount - $openBillsDue) : 0.0;
+
+        if ($previousDue > 0 && $remaining > 0) {
+            $settled = min($previousDue, $remaining);
+            $remaining -= $settled;
+            $settledLog[] = sprintf('Paid Previous Due: %.2f BDT', $settled);
+        }
+
+        // ---- Step 2: FIFO on generated_bills (oldest open bill first) -------
+        foreach ($unpaidBills as $bill) {
+            if ($remaining <= 0) {
                 break;
             }
-        }
 
-        // Overpayment: leftover beyond all open invoices becomes advance
-        // on the most recent invoice (a negative amount reflects credit).
-        if ($paymentAmount > 0) {
-            $advanceInvoice = $lastInvoice
-                ?? Invoice::where('customer_id', $customer_id)->latest('id')->first();
-            if ($advanceInvoice) {
-                $advanceInvoice->amount = (float) $advanceInvoice->amount - $paymentAmount;
-                $advanceInvoice->advance = abs($advanceInvoice->amount);
-                $advanceInvoice->status = 'paid';
-                $advanceInvoice->save();
-                $lastInvoice = $advanceInvoice;
+            $due = (float) $bill->amount - (float) $bill->paid_amount;
+            $settled = min($due, $remaining);
+            $remaining -= $settled;
+
+            if ($settled >= $due) {
+                // Payment covers this bill in full.
+                $bill->update([
+                    'paid_amount' => $bill->amount,
+                    'status' => 'paid',
+                    'paid_at' => now(),
+                ]);
+                $settledLog[] = sprintf('Settled Bill %s: %.2f BDT', $bill->billing_month, $settled);
+            } else {
+                // Partial payment — deduct what remains and keep the bill open.
+                $bill->update([
+                    'paid_amount' => (float) $bill->paid_amount + $settled,
+                    'status' => 'partially_paid',
+                ]);
+                $settledLog[] = sprintf('Partial Payment for %s: %.2f BDT', $bill->billing_month, $settled);
+            }                // payments.billing_month is a nullable TIMESTAMP column, so the
+                // bill's "2026-08" label is stored as its first-of-month date.
+                if ($settledBillMonth === null && !empty($bill->billing_month)) {
+                    try {
+                        $settledBillMonth = Carbon::parse($bill->billing_month);
+                    } catch (\Throwable $e) {
+                        $settledBillMonth = null;
+                    }
+                }
             }
+
+            // ---- Step 3: leftover payment → advance credit -----------------------
+        if ($remaining > 0) {
+            $advanceCredit = $remaining;
+            $settledLog[] = sprintf('Advance Balance: %.2f BDT', $remaining);
+            $remaining = 0;
         }
 
-        // Received total + transaction reference live on the last
-        // invoice touched (keeps the Received column meaningful).
-        if ($lastInvoice) {
-            $lastInvoice->received_amount = (float) $lastInvoice->received_amount
-                + (float) $payment->received_amount;
-            $lastInvoice->transaction_no = $payment->transaction_no;
-            $lastInvoice->notes = $payment->notes;
-            $lastInvoice->save();
+        // ---- Single ledger update (invoices: due_amount/advance/status) ------
+        // `amount` mirrors the running due so every existing reader stays
+        // consistent.
+        if ($ledger) {
+            $settledAgainstDues = $paymentAmount - $advanceCredit;
+            $newDue = max(0, (float) $ledger->due_amount - $settledAgainstDues);
+            $ledger->update([
+                'amount' => $newDue,
+                'due_amount' => $newDue,
+                'advance' => (float) $ledger->advance + $advanceCredit,
+                'status' => $newDue <= 0 ? 'paid' : 'partial',
+            ]);
+            $remainingDue = $newDue;
+        } else {
+            // No ledger row yet — remaining due is the open bill total.
+            $remainingDue = (float) $unpaidBills->sum(fn ($bill) => (float) $bill->amount - (float) $bill->paid_amount);
         }
 
-        // Remaining due after allocation drives the payment status.
-        $remainingDue = Invoice::where('customer_id', $customer_id)
-            ->whereIn('status', ['unpaid', 'partial'])
-            ->sum('amount');
-
-        // ২. পেমেন্ট স্ট্যাটাস Approved করা
+        // ২. পেমেন্ট স্ট্যাটাস Approved করা + settlement metadata
         $payment->update([
             'payment_status' => $remainingDue <= 0 ? 'paid' : 'partial',
             'approval_status' => 'approved',
             'approved_by' => $user->id,
             'approved_at' => now(),
+            'payment_info' => implode(' | ', $settledLog) ?: $payment->payment_info,
+            'billing_month' => $settledBillMonth,
         ]);
 
         // ৩. মেইল পাঠানো (অ্যাপ্রুভ হওয়ার পর)
@@ -513,12 +553,9 @@ public function pendingPayments()
                 ->send(new PaymentSuccessMail($payment->total_amount, $payment->transaction_no, $customer->name));
         }
 
-        // Customer due sync: previous_due mirrors the remaining unpaid
-        // invoice totals after settlement.
-        if ($customer) {
-            $customer->previous_due = $remainingDue;
-            $customer->save();
-        }
+        // The payment workflow touches ONLY the three billing tables
+        // (generated_bills / invoices / payments) — the customers record,
+        // including expireddate, is intentionally never altered here.
 
         // ৪. বিল সম্পূর্ণ পরিশোধ হলে Active কাস্টমারের MikroTik সার্ভিস আবার enable
         // (status enum মান ছোট হাতের 'active'; billingstatus 'Active' রাখা হয়)
@@ -547,7 +584,7 @@ public function pendingPayments()
 
             $payment->update([
                 'approval_status' => 'rejected',
-                'payment_status' => 'failed',
+                'payment_status' => 'unpaid', // 'failed' is not a valid payment_status enum value
                 'approved_by' => Auth::id(),
                 'rejection_reason' => $request->input('rejection_reason'),
             ]);
@@ -578,21 +615,22 @@ public function pendingPayments()
                     return response()->json(['error' => 'Payment not found.'], 404);
                 }
 
-            // পেমেন্টটি যদি অলরেডি Approved হয়ে থাকে, তবেই ইনভয়েস ব্যালেন্স রোলব্যাক করা হবে
+            // পেমেন্টটি যদি অলরেডি Approved হয়ে থাকে, তবেই ইনভয়েস ব্যালেন্স রোলব্যাক করা হবে
             if ($payment->approval_status === 'approved') {
                 $invoice = Invoice::where('customer_id', $customer_id)->lockForUpdate()->first();
                 if ($invoice) {
-                    // 1. Add back the payment to the outstanding balance
-                    $invoice->amount += ($payment->received_amount + $payment->discount);
+                    // 1. Add the payment back to the outstanding balance, consuming
+                    //    any advance credit first (existing columns only).
+                    $rollback = (float) $payment->received_amount + (float) $payment->discount;
+                    $advance = (float) $invoice->advance;
+                    $fromAdvance = min($advance, $rollback);
 
-                    // 2. Decrement the received total (never below zero)
-                    $invoice->received_amount = max(0, $invoice->received_amount - $payment->received_amount);
+                    $invoice->amount = max(0, (float) $invoice->amount + ($rollback - $fromAdvance));
+                    $invoice->due_amount = $invoice->amount;
+                    $invoice->advance = $advance - $fromAdvance;
 
-                    // 3. Status follows the remaining balance
-                    $invoice->status = ($invoice->amount <= 0) ? 'paid' : 'unpaid';
-
-                    // 4. Advance must mirror a negative amount (credit)
-                    $invoice->advance = ($invoice->amount < 0) ? abs($invoice->amount) : 0;
+                    // 2. Status follows the remaining balance
+                    $invoice->status = ($invoice->due_amount <= 0) ? 'paid' : 'unpaid';
 
                     $invoice->save();
                 }

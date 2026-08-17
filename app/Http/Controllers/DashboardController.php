@@ -104,14 +104,15 @@ class DashboardController extends Controller
                 ->whereBetween('created_at', [$startOfMonth, $currentDate]); // Filter by current month
         })->count();
 
-        // Total received amount for invoices created in the current month
-        $received_amount = Invoice::whereHas('customer')
-            ->whereBetween('created_at', [$startOfMonth, $currentDate])
+        // Total received amount in the current month — approved payments only
+        // (pending / rejected money is not collection).
+        $received_amount = Payment::where('approval_status', 'approved')
+            ->whereBetween('recieved_date', [$startOfMonth, $currentDate])
             ->sum('received_amount');
 
         // Total outstanding due — all unpaid/partial invoices, no date filters
         $due_amount = Invoice::whereIn('status', ['unpaid', 'partial'])
-            ->sum('amount');
+            ->sum('due_amount');
 
         // Total advance payments for invoices created in the current month
         $advance_amount = Invoice::whereHas('customer')
@@ -143,8 +144,10 @@ class DashboardController extends Controller
         $salesProduct = Sale::whereBetween('created_at', [$startOfMonth, $currentDate])
             ->sum('total');
 
-        // Total collected bill amount in the current month
-        $collected_bill = Payment::whereBetween('recieved_date', [$startOfMonth, $currentDate])
+        // Total collected bill amount in the current month — approved payments
+        // only, so pending / rejected money never inflates collection figures.
+        $collected_bill = Payment::where('approval_status', 'approved')
+            ->whereBetween('recieved_date', [$startOfMonth, $currentDate])
             ->sum('received_amount');
 
         // Total installation fee amount in the current month

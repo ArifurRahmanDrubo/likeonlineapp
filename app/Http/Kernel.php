@@ -67,5 +67,7 @@ class Kernel extends HttpKernel
     ];
     protected $routeMiddleware = [
         'permission' => \App\Http\Middleware\CheckPermissions::class,
+        'portal.customer' => \App\Http\Middleware\EnsurePortalCustomer::class,
+        'role' => \App\Http\Middleware\EnsurePortalCustomer::class,
     ];
 }

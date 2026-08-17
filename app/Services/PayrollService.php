@@ -12,6 +12,7 @@ use App\Models\Overtime;
 use App\Models\Attendance;
 use App\Models\HrSetting;
 use App\Models\Generatedsallary;
+use App\Models\SystemPermission;
 use Illuminate\Support\Facades\DB;
 
 class PayrollService
@@ -51,9 +52,17 @@ class PayrollService
 
         $settings = $this->hrSettings();
 
+        // System-permission toggles (system_permissions). These gate which
+        // salary components are calculated on BOTH manual generation and the
+        // payroll:generate cron — both funnel through this service.
+        $system = SystemPermission::first();
+        $withLateFees = $system ? $system->isEnabled('payroll_with_late_fees', true) : true;
+        $withOvertime = $system ? $system->isEnabled('payroll_with_overtime', true) : true;
+        $withAbsence = $system ? $system->isEnabled('payroll_with_absence', true) : true;
+
         $results = ['generated' => 0, 'skipped' => 0, 'details' => []];
 
-        DB::transaction(function () use ($year, $month, $monthStart, $startDate, $endDate, $salaryMonth, $settings, &$results) {
+        DB::transaction(function () use ($year, $month, $monthStart, $startDate, $endDate, $salaryMonth, $settings, $withLateFees, $withOvertime, $withAbsence, &$results) {
             foreach (Employee::all() as $employee) {
                 // A payslip can only be generated once per (employee, month).
                 $alreadyGenerated = Generatedsallary::where('employee_id', $employee->id)
@@ -81,13 +90,24 @@ class PayrollService
                 $allowances = $this->totalAllowances($employee->id, $startDate, $endDate);
 
                 $attendance = $this->attendanceSummary($employee->id, $startDate, $endDate);
-                $absentDeduction = $this->absentDeduction($employee, $startDate, $endDate);
-                // Attendance-derived late fees + any manually recorded late fees.
-                $lateFees = $this->lateFeesFromAttendance($employee->id, $startDate, $endDate, $basicSalary, $settings)
-                    + $this->totalLateFees($employee->id, $startDate, $endDate);
-                // Attendance-derived overtime pay + any manually recorded overtime.
-                $overtime = $this->overtimeFromAttendance($employee->id, $startDate, $endDate, $basicSalary, $settings)
-                    + $this->totalOvertime($employee->id, $startDate, $endDate);
+
+                // Absence deduction only when payroll_with_absence is enabled
+                // (otherwise the component is zeroed).
+                $absentDeduction = $withAbsence
+                    ? $this->absentDeduction($employee, $startDate, $endDate)
+                    : 0.0;
+                // Late-fee component (attendance-derived + manual) only when
+                // payroll_with_late_fees is enabled.
+                $lateFees = $withLateFees
+                    ? $this->lateFeesFromAttendance($employee->id, $startDate, $endDate, $basicSalary, $settings)
+                        + $this->totalLateFees($employee->id, $startDate, $endDate)
+                    : 0.0;
+                // Overtime component (attendance-derived + manual) only when
+                // payroll_with_overtime is enabled.
+                $overtime = $withOvertime
+                    ? $this->overtimeFromAttendance($employee->id, $startDate, $endDate, $basicSalary, $settings)
+                        + $this->totalOvertime($employee->id, $startDate, $endDate)
+                    : 0.0;
 
                 // Deduct the monthly EMI installment of every active advance
                 // until each advance's remaining amount reaches 0.

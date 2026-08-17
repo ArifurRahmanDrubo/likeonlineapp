@@ -44,33 +44,27 @@ class GenerateMonthlyInvoices extends Command
 
                 $existingInvoice = Invoice::where('customer_id', $customer->id)->first();
 
-                if ($existingInvoice) {
-                    // Guard against double-billing when the command runs twice
-                    // in the same month.
-                    $existingInvoiceForMonth = Invoice::where('customer_id', $customer->id)
-                        ->where('billing_month', $currentMonth)
-                        ->first();
-                    if ($existingInvoiceForMonth) {
-                        Log::info("Invoice already exists for customer ID {$customer->id} for month {$currentMonth}");
-                        continue;
-                    }
+                // Guard against double-billing when the command runs twice in
+                // the same month — the monthly snapshot in generated_bills is
+                // the per-month marker (the invoices table has no billing_month).
+                $billedThisMonth = GeneratedBill::where('customer_id', $customer->id)
+                    ->where('billing_month', $currentMonth)
+                    ->exists();
+                if ($billedThisMonth) {
+                    Log::info("Invoice already exists for customer ID {$customer->id} for month {$currentMonth}");
+                    continue;
+                }
 
+                if ($existingInvoice) {
                     // Add this month's bill to the outstanding balance.
                     // previous_due is intentionally NOT added here — it is a
                     // permanent reference on the customer record only.
+                    // amount / due_amount mirror the running ledger balance.
                     $existingInvoice->amount += $customer->monthlybill;
+                    $existingInvoice->due_amount = (float) $existingInvoice->due_amount + (float) $customer->monthlybill;
 
-                    // Apply advance balance. A negative amount already reflects
-                    // the customer's credit, so it carries forward as advance;
-                    // otherwise no advance remains after the new bill.
-                    if ($existingInvoice->amount < 0) {
-                        $existingInvoice->advance = abs($existingInvoice->amount);
-                    } else {
-                        $existingInvoice->advance = 0;
-                    }
-
-                    $existingInvoice->status = $existingInvoice->amount <= 0 ? 'paid' : 'unpaid';
-                    $existingInvoice->billing_month = $currentMonth;
+                    // Advance credit carries forward untouched.
+                    $existingInvoice->status = $existingInvoice->due_amount <= 0 ? 'paid' : 'unpaid';
                     $existingInvoice->save();
                     Log::info("Invoice updated successfully for customer ID {$customer->id} for month {$currentMonth}");
                 } else {
@@ -80,8 +74,8 @@ class GenerateMonthlyInvoices extends Command
                     $invoice = Invoice::create([
                         'customer_id' => $customer->id,
                         'amount' => $customer->monthlybill,
+                        'due_amount' => $customer->monthlybill,
                         'status' => 'unpaid',
-                        'billing_month' => $currentMonth,
                         'advance' => 0,
                     ]);
                     if ($invoice) {

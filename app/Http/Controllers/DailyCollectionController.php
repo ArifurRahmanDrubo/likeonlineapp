@@ -16,9 +16,12 @@ class DailyCollectionController extends Controller
         // Get the current date
         $currentDate = Carbon::now()->toDateString();
 
-        // Fetch daily payments with customer details
+        // Fetch today's APPROVED payments only (pending / rejected money must
+        // not inflate collection figures). recieved_date is the payment date,
+        // kept consistent with the stat cards and filtered query below.
         $dailyPayments = Payment::with(['customer.invoice', 'creator:id,name', 'approver:id,name'])
-            ->whereDate('created_at', $currentDate)
+            ->where('approval_status', 'approved')
+            ->whereDate('recieved_date', $currentDate)
             ->get();
 
         // Return data as JSON response
@@ -42,6 +45,9 @@ class DailyCollectionController extends Controller
 
             // Build query
             $query = Payment::with(['customer.invoice', 'creator:id,name', 'approver:id,name']);
+
+            // Approved payments only — pending / rejected money is not collection.
+            $query->where('approval_status', 'approved');
 
             if ($request->filled('userId')) {
                 $query->where('customer_id', $request->input('userId'));
@@ -88,12 +94,16 @@ class DailyCollectionController extends Controller
 
         $now = Carbon::now();
         $toDate = $now->toDateString(); // Y-m-d, matching the recieved_date column format
-        $received_amount = Payment::whereHas('customer')->where('recieved_date', '<=', $toDate)
+        $received_amount = Payment::whereHas('customer')
+            ->where('approval_status', 'approved')
+            ->where('recieved_date', '<=', $toDate)
             ->sum('received_amount');
         // Total outstanding due — all unpaid/partial invoices, no date filters
         $due_amount = Invoice::whereIn('status', ['unpaid', 'partial'])
-            ->sum('amount');
-        $discount = Payment::whereHas('customer')->where('recieved_date', '<=', $toDate)
+            ->sum('due_amount');
+        $discount = Payment::whereHas('customer')
+            ->where('approval_status', 'approved')
+            ->where('recieved_date', '<=', $toDate)
             ->sum('discount');
         return response()->json([
             'received_amount' => $received_amount,

@@ -35,6 +35,7 @@ return new class extends Migration
             
             // 📝 Approval Tracking Fields
             $table->unsignedBigInteger('approved_by')->nullable();
+            $table->timestamp('billing_month')->nullable();
             $table->timestamp('approved_at')->nullable();
             $table->text('rejection_reason')->nullable();
             

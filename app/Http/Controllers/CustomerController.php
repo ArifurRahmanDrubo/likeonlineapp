@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Jobs\SendSmsJob;
 use App\Models\Box;
 use App\Models\ClientType;
 use App\Models\CompanyProfile;
@@ -15,6 +16,7 @@ use App\Models\Invoice;
 use App\Models\MikrotikServer;
 use App\Models\Package;
 use App\Models\PackageChanged;
+use App\Models\Payment;
 use App\Models\ProtocolType;
 use App\Models\StatusChanged;
 use App\Models\SystemPermission;
@@ -102,6 +104,12 @@ class CustomerController extends Controller
                 $payments = $customer->invoice?->payments ?? collect();
                 $latest = $payments->sortByDesc('recieved_date')->first();
                 $customer->setAttribute('last_payment_date', $latest?->recieved_date);
+                // The Billing List "Received" column reads invoice.received_amount.
+                // The invoices table has no such column, so expose the approved
+                // payment total as a computed attribute on the loaded ledger row.
+                if ($customer->invoice) {
+                    $customer->invoice->setAttribute('received_amount', (float) $payments->sum('received_amount'));
+                }
                 return $customer;
             });
             return response()->json([
@@ -546,11 +554,12 @@ class CustomerController extends Controller
         $unpaidClient = Customer::whereHas('invoice', function ($query) {
             $query->whereIn('status', ['unpaid', 'partial']); // Adjust this field based on your actual invoice status column
         })->count();
-        $received_amount = Invoice::whereHas('customer')
+        // Collection sum — approved payments only (pending/rejected excluded).
+        $received_amount = Payment::where('approval_status', 'approved')
             ->sum('received_amount');
-        // Total outstanding due — all unpaid/partial invoices, no date filters
+        // Total outstanding due — the running ledger due, all unpaid/partial invoices.
         $due_amount = Invoice::whereIn('status', ['unpaid', 'partial'])
-            ->sum('amount');
+            ->sum('due_amount');
         $advance_amount = Invoice::whereHas('customer')
             ->sum('advance');
         // Total monthly generated bill — snapshot rows for the current billing month
@@ -695,12 +704,6 @@ class CustomerController extends Controller
                 $customer = $existingCustomer;
 
                 $settings = SystemPermission::first();
-
-                if ($settings && $settings->save_comment_in_mikrotik === 'enable') {
-                    $comment = $fullComment;
-                } else {
-                    $comment = '';
-                }
                 $mikrotikServer = MikrotikServer::find($request->input('server_id'));
                 $client = new Client([
                     'host' => $mikrotikServer->serverip,
@@ -716,7 +719,13 @@ class CustomerController extends Controller
                 $query->equal('password', $password);
                 $query->equal('profile', $profile);
                 $query->equal('service', $protocoltype);
-                $query->equal('comment', $comment);
+                // save_comment_in_mikrotik: when enabled the customer details
+                // are written into the RouterOS comment; when disabled the
+                // comment parameter is omitted entirely so the existing
+                // comment on the router is left untouched.
+                if ($settings && $settings->isEnabled('save_comment_in_mikrotik')) {
+                    $query->equal('comment', $fullComment);
+                }
                 $response = $client->query($query)->read();
 
 
@@ -732,8 +741,9 @@ class CustomerController extends Controller
                 if ($delta != 0) {
                     $invoice = $customer->invoice;
                     if ($invoice) {
-                        $invoice->amount += $delta;
-                        $invoice->status = $invoice->amount <= 0 ? 'paid' : 'unpaid';
+                        $invoice->amount = max(0, (float) $invoice->amount + $delta);
+                        $invoice->due_amount = max(0, (float) $invoice->due_amount + $delta);
+                        $invoice->status = $invoice->due_amount <= 0 ? 'paid' : 'unpaid';
                         $invoice->save();
                     }
                 }
@@ -773,8 +783,9 @@ class CustomerController extends Controller
                         if ($billDelta != 0) {
                             $invoice = $customer->invoice;
                             if ($invoice && $invoice->status === 'unpaid') {
-                                $invoice->amount += $billDelta;
-                                $invoice->status = $invoice->amount <= 0 ? 'paid' : 'unpaid';
+                                $invoice->amount = max(0, (float) $invoice->amount + $billDelta);
+                                $invoice->due_amount = max(0, (float) $invoice->due_amount + $billDelta);
+                                $invoice->status = $invoice->due_amount <= 0 ? 'paid' : 'unpaid';
                                 $invoice->save();
                             }
                         }
@@ -805,15 +816,15 @@ class CustomerController extends Controller
                         if ($invoice) {
                             $invoice->update([
                                 'amount' => $invoiceAmount,
+                                'due_amount' => max(0, $invoiceAmount),
                                 'status' => $invoiceAmount <= 0 ? 'paid' : 'unpaid',
-                                'billing_month' => $currentMonth,
                             ]);
                         } else {
                             Invoice::create([
                                 'customer_id' => $customer->id,
                                 'amount' => $invoiceAmount,
+                                'due_amount' => max(0, $invoiceAmount),
                                 'status' => $invoiceAmount <= 0 ? 'paid' : 'unpaid',
-                                'billing_month' => $currentMonth,
                                 'advance' => 0,
                             ]);
                         }
@@ -837,14 +848,28 @@ class CustomerController extends Controller
                         // they are not billed for this month. If nothing (or
                         // only previous due) remains, mark it paid accordingly.
                         $invoice = $customer->invoice;
-                        if ($invoice && $invoice->billing_month === $currentMonth && $invoice->status === 'unpaid') {
-                            $invoice->amount -= $billAmount;
-                            $invoice->status = $invoice->amount <= 0 ? 'paid' : 'unpaid';
-                            $invoice->billing_month = $billingMonth;
+                        // The generated bill we fetched above is scoped to the
+                        // current month, so no billing_month check is needed here.
+                        if ($invoice && $invoice->status === 'unpaid') {
+                            $invoice->amount = max(0, (float) $invoice->amount - $billAmount);
+                            $invoice->due_amount = max(0, (float) $invoice->due_amount - $billAmount);
+                            $invoice->status = $invoice->due_amount <= 0 ? 'paid' : 'unpaid';
                             $invoice->save();
                         }
                     }
                 }
+
+                    $smsBody = "Dear ,\n"
+                        . "Congratulations! Your '' Registration has been Successfully Completed.\n"
+                        . "We have received BDT  for your  Participant"
+                        . ".\n"
+                        . "Your Reg. ID is . Please remember your Reg. ID for further queries.\n\n"
+                        . "Thanks,\n"
+                        . "Chapai Utsab Reg. Sub-comittee 2026\n"
+                        . "Contact:";
+                    if (isValidBangladeshiNumber($mobile)) {
+                        SendSmsJob::dispatch($mobile, $smsBody, 'greetings');
+                    }
 
                 return response()->json(['message' => 'Client updated successfully']);
             } else {
@@ -889,12 +914,12 @@ class CustomerController extends Controller
                 $previousDue = (float) ($validated['previous_due'] ?? 0);
                 $amount = $firstMonthBill + $previousDue;
 
-                // Initial invoice for the customer.
+                // Initial invoice for the customer (single account ledger row).
                 Invoice::create([
                     'customer_id' => $customer->id,
                     'amount' => $amount,
+                    'due_amount' => max(0, $amount),
                     'status' => $amount <= 0 ? 'paid' : 'unpaid',
-                    'billing_month' => $billingMonth,
                     'advance' => 0,
                 ]);
 
@@ -1380,12 +1405,6 @@ class CustomerController extends Controller
     {
         try {
             $settings = SystemPermission::first();
-
-            if ($settings && $settings->save_comment_in_mikrotik === 'enable') {
-                $comment = $fullComment;
-            } else {
-                $comment = '';
-            }
             $client = new Client([
                 'host' => $mikrotikServer->serverip,
                 'user' => $mikrotikServer->Username,
@@ -1401,7 +1420,12 @@ class CustomerController extends Controller
             $query->equal('password', $password);
             $query->equal('profile', $profile);
             $query->equal('service', $service);
-            $query->equal('comment', $comment);
+            // save_comment_in_mikrotik: when enabled the customer details are
+            // stored in the RouterOS comment; when disabled the comment
+            // parameter is omitted entirely (null-equivalent on add).
+            if ($settings && $settings->isEnabled('save_comment_in_mikrotik')) {
+                $query->equal('comment', $fullComment);
+            }
 
             $response = $client->query($query)->read();
             // Log::info("Raw Response from MikroTik: " . print_r($response, true));

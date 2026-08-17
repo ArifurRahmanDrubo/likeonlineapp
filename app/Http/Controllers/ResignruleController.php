@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\ResignRule;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 
 class ResignruleController extends Controller
 {
@@ -49,13 +50,23 @@ class ResignruleController extends Controller
         return response()->json($Resignrule);
     }
 
-    public function destroy(Request $request)
-    {
-        $ResignRule = ResignRule::findOrFail($request->input('id'));
-        $ResignRule->delete();
+public function destroy(Request $request)
+{
 
-        return response()->json(null, 204);
+
+    $ResignRule = ResignRule::find($request->input('id'));
+
+    if (!$ResignRule) {
+        return response()->json([
+            'message' => 'Resign rule not found.',
+            'id_received' => $request->input('id'),
+        ], 404);
     }
+
+    $ResignRule->delete();
+
+    return response()->json(null, 204);
+}
     public function deleteMultiple(Request $request)
     {
         ResignRule::whereIn('id', $request->ids)->delete();

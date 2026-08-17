@@ -6,6 +6,8 @@ use Exception;
 use PEAR2\Net\RouterOS\Client as RouterOSClient;
 use PEAR2\Net\RouterOS\Request;
 use App\Models\MikrotikServer;
+use RouterOS\Client;
+use RouterOS\Query;
 
 class MikroTikService
 {
@@ -15,18 +17,67 @@ class MikroTikService
     protected $password;
     protected $port;
 
-    public function __construct($host, $username, $password, $port = 8728)
+    public function __construct($host = null, $username = null, $password = null, $port = 8728)
     {
         $this->host = $host;
         $this->username = $username;
         $this->password = $password;
         $this->port = $port;
 
+        // Credentials are optional so the service can be resolved from the
+        // container (app(MikroTikService::class)) and connect lazily per-call;
+        // eager connection is only attempted when a host is supplied.
+        if (!$host) {
+            return;
+        }
+
         try {
             $this->client = new RouterOSClient($host, $username, $password, $port);
         } catch (\Exception $e) {
             throw new \Exception('Failed to connect to MikroTik: ' . $e->getMessage());
         }
+    }
+
+    /**
+     * Look up a customer's live PPPoE session on the assigned MikroTik server
+     * and return the active caller-id (MAC address).
+     *
+     * Returns null when the server is missing, the user is offline, or the
+     * session carries no caller-id — callers should fall back gracefully.
+     *
+     * @param int|string|null $serverId customers.server_id
+     * @param string          $username customers.username
+     * @return array{name: string|null, caller-id: string|null, address: string|null, uptime: string|null}|null
+     */
+    public function getActivePppoeSession($serverId, $username)
+    {
+        $server = MikrotikServer::find($serverId);
+        if (!$server) {
+            return null;
+        }
+
+        $client = new Client([
+            'host' => $server->serverip,
+            'user' => $server->Username,
+            'pass' => $server->password,
+            'port' => (int) ($server->port ?? 8728),
+        ]);
+
+        $query = new Query('/ppp/active/print');
+        $query->where('name', $username);
+
+        foreach ($client->query($query)->read() as $session) {
+            if (($session['name'] ?? null) === $username) {
+                return [
+                    'name' => $session['name'] ?? null,
+                    'caller-id' => $session['caller-id'] ?? null,
+                    'address' => $session['address'] ?? null,
+                    'uptime' => $session['uptime'] ?? null,
+                ];
+            }
+        }
+
+        return null;
     }
 
     public function connect($host, $username, $password)

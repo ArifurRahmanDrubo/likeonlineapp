@@ -46,6 +46,12 @@ use App\Http\Controllers\ResellerBoxController;
 use App\Http\Controllers\SystemSetupController;
 use App\Http\Controllers\UserProfileController;
 use App\Http\Controllers\WebCustomerController;
+use App\Http\Controllers\Api\Portal\AuthController as PortalAuthController;
+use App\Http\Controllers\Api\Portal\DashboardController as PortalDashboardController;
+use App\Http\Controllers\Api\Portal\BillingController as PortalBillingController;
+use App\Http\Controllers\Api\Portal\BkashPaymentController as PortalBkashPaymentController;
+use App\Http\Controllers\Api\Portal\NagadPaymentController as PortalNagadPaymentController;
+use App\Http\Controllers\Api\Portal\PackageController as PortalPackageController;
 use App\Http\Controllers\EquipmentUseController;
 use App\Http\Controllers\InvoiceSetupController;
 use App\Http\Controllers\ProtocolTypeController;
@@ -76,6 +82,10 @@ use App\Http\Controllers\CustomerBillingStatusController;
 //web
 Route::post('/contact', [WebCustomerController::class, 'storeContact']);
 
+// Public branding endpoint — lets the public login/register pages show the
+// company name/logo without authentication.
+Route::get('/public/company-profile', [CompanyProfileController::class, 'index']);
+
 Route::get('/get-webpackage', [WebCustomerController::class, 'webpackage']);
 Route::post('/customer-new-line', [WebCustomerController::class, 'storeCustomerNewLine']);
 
@@ -95,6 +105,43 @@ Route::post('/logoutOtherUser', [AuthController::class, 'logoutOtherUser'])->mid
 Route::get('/user', [AuthController::class, 'user'])->middleware('auth:sanctum');
 Route::middleware('auth:sanctum')->get('/user-permissions', [RoleAndPermissionController::class, 'getUserPermissions']);
 
+// ---------------------------------------------------------------------------
+// Customer Portal (self-service)
+// ---------------------------------------------------------------------------
+// Public Portal Routes
+Route::prefix('portal')->group(function () {
+    Route::post('/register', [PortalAuthController::class, 'register']);
+    Route::post('/login', [PortalAuthController::class, 'customerLogin']);
+});
+
+// Two-step email-verified registration (OTP via email, 10-minute validity):
+//   POST /api/register/send-otp   -> validate credentials, email the 6-digit OTP
+//   POST /api/register/verify-otp -> verify OTP, create + bind account, auto-login
+Route::post('/register/send-otp', [PortalAuthController::class, 'sendOtp']);
+Route::post('/register/verify-otp', [PortalAuthController::class, 'verifyOtp']);
+
+// Protected Customer Portal Routes
+Route::middleware(['auth:sanctum', 'role:client'])->prefix('portal')->group(function () {
+    Route::get('/me', [PortalAuthController::class, 'me']);
+    Route::get('/dashboard', [PortalDashboardController::class, 'index']);
+    Route::get('/invoices', [PortalBillingController::class, 'invoices']);
+    Route::get('/invoices/{id}/pdf', [PortalBillingController::class, 'downloadPdf']);
+    Route::get('/payments/{id}/pdf', [PortalBillingController::class, 'paymentPdf']);
+    Route::get('/reports/all-bills-pdf', [PortalBillingController::class, 'allBillsPdf']);
+    Route::get('/reports/all-payments-pdf', [PortalBillingController::class, 'allPaymentsPdf']);
+    Route::post('/payments/submit', [PortalBillingController::class, 'submitPayment']);
+
+    // Online payment gateways (bKash / Nagad) — create the checkout session
+    Route::post('/payments/bkash/create', [PortalBkashPaymentController::class, 'createPayment']);
+    Route::post('/payments/nagad/create', [PortalNagadPaymentController::class, 'createPayment']);
+    Route::get('/packages', [PortalPackageController::class, 'index']);
+    Route::post('/package-change', [PortalPackageController::class, 'requestChange']);
+
+    // Realtime bandwidth monitor (scoped to the authenticated customer)
+    Route::get('/bandwidth/status', [PortalDashboardController::class, 'status']);
+    Route::post('/bandwidth/start', [PortalDashboardController::class, 'startMonitor']);
+    Route::post('/bandwidth/stop', [PortalDashboardController::class, 'stopMonitor']);
+});
 
 Route::middleware(['auth:sanctum'])->group(function () {
     //configuration
@@ -120,7 +167,7 @@ Route::middleware(['auth:sanctum'])->group(function () {
     Route::get('get-connection-type', [ConnectionTypeController::class, 'index'])->middleware('permission:connection_type,read');
     Route::post('create-connection-type', [ConnectionTypeController::class, 'store'])->middleware('permission:connection_type,write');
     Route::post('update-connection-type', [ConnectionTypeController::class, 'update'])->middleware('permission:connection_type,write');
-    Route::post('delete-connection-type', [ConnectionTypeController::class, 'destroy'])->middleware('permission:connection_type,full');
+    Route::post('delete-connection-type', [ConnectionTypeController::class, 'destroy'])->middleware('permission:connapi/portal/bandwidth/startection_type,full');
     Route::post('connection-type/delete-multiple', [ConnectionTypeController::class, 'deleteMultiple'])->middleware('permission:connection_type,full');
     //clienttype
     Route::get('get-client-type', [ClientTypeController::class, 'index'])->middleware('permission:client_type,read');
