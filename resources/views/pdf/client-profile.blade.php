@@ -223,7 +223,10 @@
                     </div>
                 </td>
                 <td style="width:30%; text-align:right; vertical-align:middle;">
-                    @if (!empty($images['company']))
+                    {{-- Invoice Setup logo (direct Cloudinary URL) preferred, else company image --}}
+                    @if (!empty(optional($setup ?? null)->image))
+                        <img src="{{ $setup->image }}" style="max-width:110px; max-height:50px;" alt="{{ $setup->company_name ?? '' }}">
+                    @elseif (!empty($images['company']))
                         <img src="{{ $images['company'] }}" style="max-width:110px; max-height:50px;" alt="">
                     @endif
                 </td>

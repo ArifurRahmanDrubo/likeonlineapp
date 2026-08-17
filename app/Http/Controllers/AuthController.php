@@ -7,6 +7,7 @@ use App\Models\User;
 use App\Mail\OTPMail;
 use App\Models\Customer;
 use App\Models\CustomRole;
+use App\Services\MailConfigService;
 use Illuminate\Http\Request;
 use App\Models\CustomPermission;
 use Illuminate\Auth\Events\Logout;
@@ -279,6 +280,7 @@ class AuthController extends Controller
             $count = User::where('email', '=', $email)->count();
 
             if ($count == 1) {
+                MailConfigService::apply();
                 Mail::to($email)->send(new OTPMail($otp));
                 User::where('email', '=', $email)->update(['otp' => $otp]);
                 return response()->json(['status' => 'success', 'message' => '4 Digit OTP Code has been send to your email !']);

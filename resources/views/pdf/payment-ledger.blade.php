@@ -27,6 +27,10 @@
         {{-- Company details render only when company_name_invoice is enabled --}}
         @if ($show_company ?? true)
         <div>
+            {{-- Direct Cloudinary URL — rendered as-is, no base64 --}}
+            @if (!empty(optional($setup)->image))
+                <img src="{{ $setup->image }}" alt="{{ optional($setup)->company_name ?? 'Company Logo' }}" style="max-width: 150px; max-height: 60px; margin-bottom: 6px;" />
+            @endif
             <div class="company-title">{{ optional($setup)->company_name ?? optional($company)->title ?? 'Internet Service Provider' }}</div>
             <div class="company-info">
                 @if (!empty(optional($company)->address)){{ $company->address }}<br>@endif

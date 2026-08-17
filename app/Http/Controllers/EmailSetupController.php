@@ -31,11 +31,12 @@ class EmailSetupController extends Controller
     public function store(Request $request)
     {
         $data = $request->validate([
+            'mailer' => 'nullable|string|max:255',
             'host' => 'required|string|max:255',
             'port' => 'nullable|max:255',
             'username' => 'nullable|string|max:255',
-            'password' => 'nullable|string|max:15',
-            'mail_from_name' => 'nullable|string|max:15',
+            'password' => 'nullable|string|max:255',
+            'mail_from_name' => 'nullable|string|max:255',
             'mail_from_email' => 'nullable|email|max:255',
             'encryption' => 'nullable|max:255',
 
@@ -46,10 +47,10 @@ class EmailSetupController extends Controller
         if ($EmailSetup) {
             $EmailSetup->update($data);
         } else {
-            EmailSetup::create($data);
+            $EmailSetup = EmailSetup::create($data);
         }
 
-        return response()->json(['message' => 'EmailSetup Updated successfully']);
+        return response()->json(['message' => 'EmailSetup Updated successfully', 'data' => $EmailSetup]);
     }
 
 

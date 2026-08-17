@@ -19,7 +19,21 @@ class DailyCollectionController extends Controller
         // Fetch today's APPROVED payments only (pending / rejected money must
         // not inflate collection figures). recieved_date is the payment date,
         // kept consistent with the stat cards and filtered query below.
-        $dailyPayments = Payment::with(['customer.invoice', 'creator:id,name', 'approver:id,name'])
+        // Fetch ONLY the columns rendered by the Vue Daily Bill Collection
+        // page (Date, C.Code/UserName/Cus.Name/Mobile/M.Bill via customer,
+        // Note, Received, Discount, BalanceDue via invoice, Payment_method,
+        // Recieved By, Approved By, Created By) — no full-model fetch.
+        $dailyPayments = Payment::select([
+                'id', 'recieved_date', 'customer_id', 'notes', 'received_amount',
+                'discount', 'payment_info', 'recieved_by', 'created_by', 'approved_by',
+            ])
+            ->with([
+                // id is required for the formatted_id accessor (C.Code).
+                'customer:id,username,name,mobile,monthlybill',
+                'customer.invoice:id,customer_id,amount',
+                'creator:id,name',
+                'approver:id,name',
+            ])
             ->where('approval_status', 'approved')
             ->whereDate('recieved_date', $currentDate)
             ->get();
@@ -43,8 +57,18 @@ class DailyCollectionController extends Controller
             $toDate = $request->filled('toDate') ? Carbon::parse($request->input('toDate'))->format('Y-m-d') : null;
             $fromDate = $request->filled('fromDate') ? Carbon::parse($request->input('fromDate'))->format('Y-m-d') : null;
 
-            // Build query
-            $query = Payment::with(['customer.invoice', 'creator:id,name', 'approver:id,name']);
+            // Build query — only the columns rendered by the Daily Bill
+            // Collection page, with UI-scoped eager loads (id is needed for
+            // the customer's formatted_id accessor / C.Code column).
+            $query = Payment::select([
+                'id', 'recieved_date', 'customer_id', 'notes', 'received_amount',
+                'discount', 'payment_info', 'recieved_by', 'created_by', 'approved_by',
+            ])->with([
+                'customer:id,username,name,mobile,monthlybill',
+                'customer.invoice:id,customer_id,amount',
+                'creator:id,name',
+                'approver:id,name',
+            ]);
 
             // Approved payments only — pending / rejected money is not collection.
             $query->where('approval_status', 'approved');

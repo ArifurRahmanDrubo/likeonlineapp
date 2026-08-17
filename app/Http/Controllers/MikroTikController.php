@@ -197,7 +197,15 @@ public function getUsers(Request $request)
         if (!empty($userType)) {
             $query->where('user_status', $userType);
         }
-        $unimportedUsers = $query->orderBy('id', 'desc')->paginate($perPage, ['*'], 'page', $page);
+        // Fetch ONLY the columns rendered by the Vue Import From Mikrotik page:
+        // Name, Password, Service, Profile, Caller Id, Server Name, LogOut Time,
+        // User Status, the status InputSwitch and the action payload fields.
+        $unimportedUsers = $query->orderBy('id', 'desc')->paginate(
+            $perPage,
+            ['id', 'name', 'password', 'service', 'profile', 'caller_id', 'server_name', 'last_logged_out', 'user_status', 'disabled', 'mikrotik_id', 'server_id'],
+            'page',
+            $page
+        );
 
         return response()->json([
             'status' => true,

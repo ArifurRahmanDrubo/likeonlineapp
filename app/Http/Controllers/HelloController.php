@@ -11,6 +11,7 @@ use App\Models\MikrotikServer;
 use App\Models\MUser;
 use App\Models\Payment;
 use App\Models\User;
+use App\Services\MailConfigService;
 use Carbon\Carbon;
 use Exception;
 use Illuminate\Http\Request;
@@ -39,9 +40,22 @@ public function clientList(Request $request)
         // Left clients are managed on the dedicated Left Client page, so they
         // are excluded here. NULL-safe: legacy customers without a status are
         // still shown.
-        return Customer::where(function ($q) {
-            $q->whereNull('status')->orWhere('status', '!=', 'left');
-        })->paginate($perPage);
+        // Fetch ONLY the columns rendered by the Vue Client List page: table
+        // cells (C.Code, ID/IP, Password, Cus.Name, Mobile, Zone, Cus_Type,
+        // Conn_Type, Package, Speed, M.Bill, Server, Live MAC, M.Status,
+        // B.Status), the row actions (Profile/Edit/Live Monitor/Make Left),
+        // plus the PDF/Excel export fields. `id` is required for the
+        // formatted_id accessor and row selection.
+        return Customer::select([
+                'id', 'username', 'password', 'name', 'mobile', 'zone',
+                'clienttype', 'connectiontype', 'package', 'profile',
+                'monthlybill', 'server', 'caller_id', 'mikrotikStatus',
+                'billingstatus', 'server_id', 'radius_id', 'status', 'praddress',
+            ])
+            ->where(function ($q) {
+                $q->whereNull('status')->orWhere('status', '!=', 'left');
+            })
+            ->paginate($perPage);
     } catch (\Exception $e) {
         Log::error("Failed to fetch client list: {$e->getMessage()}");
 
@@ -210,6 +224,7 @@ public function clientList(Request $request)
             }
 
             // Send payment success email
+            MailConfigService::apply();
             Mail::to($customer->email) // Sending to the customer's email
                 ->send(new PaymentSuccessMail($total_amount, $transactionno, $customer->name));
 

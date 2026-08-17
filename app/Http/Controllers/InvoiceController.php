@@ -236,6 +236,7 @@ use App\Models\Customer;
 use App\Models\GeneratedBill;
 use App\Models\Invoice;
 use App\Models\Payment;
+use App\Services\MailConfigService;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -312,19 +313,33 @@ class InvoiceController extends Controller
 public function pendingPayments()
 {
     try {
-        $pendingPayments = Payment::with(['customer', 'creator:id,name', 'approver:id,name'])
+        // Fetch ONLY the columns rendered by the Vue Payment Pending page
+        // (Payment ID, Customer, Amount, Trx ID, Method, Date, Created By,
+        // Approved By) — no full-model fetch.
+        $pendingPayments = Payment::select([
+                'id', 'payment_id', 'customer_id', 'received_amount',
+                'transaction_no', 'payment_method', 'payment_info',
+                'recieved_date', 'created_by', 'approved_by',
+            ])
+            ->with([
+                'customer:id,username,name,mobile',
+                'creator:id,name',
+                'approver:id,name',
+            ])
             ->where('approval_status', 'pending')
             ->latest()
             ->get();
 
-        // 🌟 মোট পেন্ডিং টাকা এবং মোট পেন্ডিং কাউন্ট হিসাব
-        $totalPendingAmount = $pendingPayments->sum('received_amount');
-        $totalPendingCount  = $pendingPayments->count();
+        // মোট পেন্ডিং টাকা এবং কাউন্ট — single SQL aggregation instead of
+        // iterating the full collection in PHP.
+        $totals = Payment::where('approval_status', 'pending')
+            ->selectRaw('COALESCE(SUM(received_amount), 0) as total_amount, COUNT(*) as total_count')
+            ->first();
 
         return response()->json([
             'payments'             => $pendingPayments,
-            'total_pending_amount' => $totalPendingAmount,
-            'total_pending_count'  => $totalPendingCount,
+            'total_pending_amount' => (float) $totals->total_amount,
+            'total_pending_count'  => (int) $totals->total_count,
         ], 200);
 
     } catch (\Exception $e) {
@@ -549,6 +564,7 @@ public function pendingPayments()
         // ৩. মেইল পাঠানো (অ্যাপ্রুভ হওয়ার পর)
         $customer = Customer::find($customer_id);
         if ($customer && $customer->email) {
+            MailConfigService::apply();
             Mail::to($customer->email)
                 ->send(new PaymentSuccessMail($payment->total_amount, $payment->transaction_no, $customer->name));
         }

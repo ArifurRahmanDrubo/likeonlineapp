@@ -7,101 +7,120 @@ use App\Models\Invoice;
 use App\Models\Customer;
 use App\Models\GeneratedBill;
 use Illuminate\Console\Command;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
 class GenerateMonthlyInvoices extends Command
 {
     protected $signature = 'generate:monthly-invoices';
-    protected $description = 'Generate monthly invoices for all customers';
+    protected $description = 'Generate monthly invoices with advance balance adjustment';
 
     public function handle()
     {
-        try {
+        $currentMonth = Carbon::now()->format('Y-m');
+        Log::info("Starting monthly invoice generation for: {$currentMonth}");
 
-            // Never generate invoices for Left clients. NULL-safe: customers
-            // that predate the status column (status IS NULL) must still be
-            // billed, only status = 'left' is excluded.
-            $customers = Customer::where(function ($q) {
-                $q->whereNull('status')->orWhere('status', '!=', 'left');
-            })->get();
-            $currentMonth = Carbon::now()->format('Y-m'); // Current month in 'YYYY-MM' format
+        // Process in chunks to prevent server memory crashes
+        Customer::where(function ($q) {
+            $q->whereNull('status')->orWhere('status', '!=', 'left');
+        })->chunk(100, function ($customers) use ($currentMonth) {
 
             foreach ($customers as $customer) {
-                if ($customer->billingstatus !== 'Active') {
-                    Log::info("Skipping inactive customer ID {$customer->id}");
-                    continue;
-                }
-
-                $dateString = $customer->billingmonth;
-                $convertedDateString = preg_replace('/ \([^)]*\)$/', '', $dateString);
-                $billingMonth = Carbon::parse($convertedDateString)->format('Y-m');
-
-                // Only customers whose billing month has started are billed
-                if ($billingMonth > $currentMonth) {
-                    Log::info("Skipping customer ID {$customer->id} as billing month {$billingMonth} is not less than or equal to current month {$currentMonth}");
-                    continue;
-                }
-
-                $existingInvoice = Invoice::where('customer_id', $customer->id)->first();
-
-                // Guard against double-billing when the command runs twice in
-                // the same month — the monthly snapshot in generated_bills is
-                // the per-month marker (the invoices table has no billing_month).
-                $billedThisMonth = GeneratedBill::where('customer_id', $customer->id)
-                    ->where('billing_month', $currentMonth)
-                    ->exists();
-                if ($billedThisMonth) {
-                    Log::info("Invoice already exists for customer ID {$customer->id} for month {$currentMonth}");
-                    continue;
-                }
-
-                if ($existingInvoice) {
-                    // Add this month's bill to the outstanding balance.
-                    // previous_due is intentionally NOT added here — it is a
-                    // permanent reference on the customer record only.
-                    // amount / due_amount mirror the running ledger balance.
-                    $existingInvoice->amount += $customer->monthlybill;
-                    $existingInvoice->due_amount = (float) $existingInvoice->due_amount + (float) $customer->monthlybill;
-
-                    // Advance credit carries forward untouched.
-                    $existingInvoice->status = $existingInvoice->due_amount <= 0 ? 'paid' : 'unpaid';
-                    $existingInvoice->save();
-                    Log::info("Invoice updated successfully for customer ID {$customer->id} for month {$currentMonth}");
-                } else {
-                    // First invoice for this customer — the full monthly bill.
-                    Log::info("Creating new invoice for customer ID {$customer->id} for month {$currentMonth}");
-
-                    $invoice = Invoice::create([
-                        'customer_id' => $customer->id,
-                        'amount' => $customer->monthlybill,
-                        'due_amount' => $customer->monthlybill,
-                        'status' => 'unpaid',
-                        'advance' => 0,
-                    ]);
-                    if ($invoice) {
-                        Log::info("Invoice created successfully for customer ID {$customer->id} for month {$currentMonth}");
-                    } else {
-                        Log::warning("Failed to create invoice for customer ID {$customer->id} for month {$currentMonth}");
+                try {
+                    // 1. Skip inactive customers
+                    if ($customer->billingstatus !== 'Active') {
+                        continue;
                     }
+
+                    // 2. Safe Date Parsing Check for Billing Start Month
+                    if (!empty($customer->billingmonth)) {
+                        $convertedDateString = preg_replace('/ \([^)]*\)$/', '', $customer->billingmonth);
+                        try {
+                            $billingMonth = Carbon::parse($convertedDateString)->format('Y-m');
+                            if ($billingMonth > $currentMonth) {
+                                continue; // Future billing start month, skip
+                            }
+                        } catch (\Exception $e) {
+                            Log::warning("Invalid billingmonth format for Customer ID {$customer->id}: {$customer->billingmonth}");
+                            continue;
+                        }
+                    }
+
+                    // 3. Double-billing Guard
+                    $billedThisMonth = GeneratedBill::where('customer_id', $customer->id)
+                        ->where('billing_month', $currentMonth)
+                        ->exists();
+
+                    if ($billedThisMonth) {
+                        continue;
+                    }
+
+                    // 4. Safe Database Operation with Transaction
+                    DB::transaction(function () use ($customer, $currentMonth) {
+                        $monthlyBill = (float) $customer->monthlybill;
+                        $existingInvoice = Invoice::where('customer_id', $customer->id)->first();
+
+                        if ($existingInvoice) {
+                            $currentAdvance = (float) $existingInvoice->advance;
+                            $currentDue = (float) $existingInvoice->due_amount;
+
+                            // Total ledger amount updated
+                            $existingInvoice->amount += $monthlyBill;
+
+                            if ($currentAdvance > 0) {
+                                if ($currentAdvance >= $monthlyBill) {
+                                    // Advance covers the entire monthly bill
+                                    $existingInvoice->advance = $currentAdvance - $monthlyBill;
+                                    // Due amount remains unchanged (bill is paid from advance)
+                                } else {
+                                    // Advance partially covers the monthly bill
+                                    $remainingBill = $monthlyBill - $currentAdvance;
+                                    $existingInvoice->due_amount = $currentDue + $remainingBill;
+                                    $existingInvoice->advance = 0; // Advance fully used up
+                                }
+                            } else {
+                                // No advance available, add full bill to due
+                                $existingInvoice->due_amount = $currentDue + $monthlyBill;
+                            }
+
+                            // Determine invoice payment status
+                            $existingInvoice->status = $existingInvoice->due_amount <= 0 ? 'paid' : 'unpaid';
+                            $existingInvoice->save();
+
+                        } else {
+                            // First invoice for this customer
+                            $dueAmount = $monthlyBill;
+                            $status = 'unpaid';
+
+                            $invoice = Invoice::create([
+                                'customer_id' => $customer->id,
+                                'amount'      => $monthlyBill,
+                                'due_amount'  => $dueAmount,
+                                'status'      => $status,
+                                'advance'     => 0,
+                            ]);
+                        }
+
+                        // Historical snapshot of the bill for monthly ledger
+                        GeneratedBill::create([
+                            'customer_id'   => $customer->id,
+                            'billing_month' => $currentMonth,
+                            'amount'        => $monthlyBill,
+                            'package'       => $customer->package,
+                            'speed'         => $customer->profile,
+                            'status'        => ($existingInvoice && $existingInvoice->advance >= $monthlyBill) ? 'paid' : 'unpaid',
+                            'generated_at'  => Carbon::now()->toDateString(),
+                        ]);
+                    });
+
+                    Log::info("Successfully generated invoice and adjusted advance for Customer ID {$customer->id}");
+
+                } catch (\Exception $e) {
+                    Log::error("Failed to generate invoice for Customer ID {$customer->id}: " . $e->getMessage());
                 }
-
-                // Historical snapshot of the bill for reporting
-                GeneratedBill::create([
-                    'customer_id' => $customer->id,
-                    'billing_month' => $currentMonth,
-                    'amount' => $customer->monthlybill,
-                    'package' => $customer->package,
-                    'speed' => $customer->profile,
-                    'status' => 'unpaid',
-                    'generated_at' => Carbon::now()->format('d F Y'),
-                ]);
             }
+        });
 
-            $this->info('Monthly invoices generated successfully.');
-            Log::info('Monthly invoices generated successfully for ' . $currentMonth);
-        } catch (\Exception $e) {
-            $this->error('Error generating monthly invoices: ' . $e->getMessage());
-            Log::error('Error generating monthly invoices: ' . $e->getMessage());
-        }
+        $this->info("Monthly invoice generation and advance adjustment completed.");
     }
 }

@@ -18,9 +18,8 @@ return new class extends Migration
             $table->string('numbers')->nullable();
             $table->text('address')->nullable();
             $table->string('website')->nullable();
-            $table->string('invoice_title')->nullable();
             $table->string('image')->nullable();
-            $table->string('image_public_id')->nullable()->after('image');
+            $table->string('image_public_id')->nullable();
             $table->text('invoice_note')->nullable();
             $table->timestamps(); // Adds 'created_at' and 'updated_at' columns
         });

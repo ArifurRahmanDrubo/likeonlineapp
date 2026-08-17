@@ -8,6 +8,7 @@ use App\Models\Customer;
 use App\Models\CustomPermission;
 use App\Models\CustomRole;
 use App\Models\User;
+use App\Services\MailConfigService;
 use Exception;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
@@ -179,6 +180,7 @@ class AuthController extends Controller
                 'password' => Hash::make($request->input('password')),
             ], now()->addMinutes(10));
 
+            MailConfigService::apply();
             Mail::to($email)->send(new RegistrationOtpMail($otp));
 
             return response()->json([

@@ -353,12 +353,24 @@ Route::middleware(['auth:sanctum'])->group(function () {
 
 
     //Report
+    // Optimized Bill Collection Report endpoints (existing endpoints below stay intact)
+    Route::get('bill-collection-filters', [ReportController::class, 'billCollectionFilters']);
+    Route::get('bill-collection-report', [ReportController::class, 'billCollectionReport']);
     Route::get('getBillCollection', [ReportController::class, 'getBillCollection']);
     Route::get('getBillCollectionQuery', [ReportController::class, 'getBillCollectionQuery']);
+    // Optimized Discount Report endpoints (existing endpoints below stay intact)
+    Route::get('discount-report-filters', [ReportController::class, 'discountReportFilters']);
+    Route::get('discount-report', [ReportController::class, 'discountReport']);
     Route::get('getDiscountReport', [ReportController::class, 'getDiscountReport']);
     Route::get('getDiscountReportQuery', [ReportController::class, 'getDiscountReportQuery']);
+    // Optimized Customer Report endpoints (existing endpoints below stay intact)
+    Route::get('customer-report-filters', [ReportController::class, 'customerReportFilters']);
+    Route::get('customer-report', [ReportController::class, 'customerReport']);
     Route::get('getCustomerReport', [ReportController::class, 'getCustomerReport']);
     Route::post('getCustomerReportQuery', [ReportController::class, 'getCustomerReportQuery']);
+    // Optimized BTRC Monthly Report endpoints
+    Route::get('btrc-report-filters', [ReportController::class, 'btrcReportFilters']);
+    Route::get('btrc-report', [ReportController::class, 'btrcReport']);
     //employee
     Route::post('create-employee', [EmployeeController::class, 'store'])->middleware('permission:add_employee,write');
     Route::post('delete-employee', [HelloController::class, 'DeleteEmployee'])->middleware('permission:delete_employee_profile,full');

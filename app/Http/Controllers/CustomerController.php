@@ -53,8 +53,27 @@ class CustomerController extends Controller
     public function index(Request $request)
     {
         try {
-            $query = Customer::with(['invoice.payments' => function ($q) {
-                $q->where('approval_status', 'approved');
+            // Fetch ONLY the columns rendered by the Vue Billing List page
+            // (table cells, Pay dialog, status/package change dialogs, and the
+            // Excel/PDF exports). `id` is required for the formatted_id
+            // accessor, row selection and the Pay dialog (invoice.customer_id).
+            $query = Customer::select([
+                'id', 'username', 'name', 'mobile', 'zone', 'clienttype',
+                'connectiontype', 'praddress', 'package', 'profile',
+                'expireddate', 'monthlybill', 'server', 'mikrotikStatus',
+                'billingstatus', 'server_id', 'radius_id', 'protocoltype', 'status',
+            ])->with(['invoice' => function ($q) {
+                // Only the ledger columns the page renders: Received (computed
+                // from approved payments below), BalanceDue, Advance, B.Status
+                // and the customer link used by the Pay dialog.
+                $q->select(['id', 'customer_id', 'amount', 'advance', 'status'])
+                    ->with(['payments' => function ($p) {
+                        // Only the payment fields needed to derive the "Payment
+                        // Date" column (latest approved recieved_date) and the
+                        // "Received" column (approved received_amount sum).
+                        $p->select(['id', 'customer_id', 'recieved_date', 'received_amount'])
+                            ->where('approval_status', 'approved');
+                    }]);
             }]);
 
             if ($request->filled('package_id')) {
@@ -1329,10 +1348,12 @@ class CustomerController extends Controller
 
             $customer = Customer::with($relations)->findOrFail($id);
             $company = CompanyProfile::first();
+            $setup = \App\Models\InvoiceSetup::first();
 
             $html = view('pdf.client-profile', [
                 'customer' => $customer,
                 'company' => $company,
+                'setup' => $setup,
                 'sections' => $sections,
                 'billingStartMonth' => $this->formatMonthYear($customer->billingmonth),
                 // Direct image URLs (not base64) — mPDF fetches them at render time

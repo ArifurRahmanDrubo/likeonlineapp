@@ -20,20 +20,20 @@ class Kernel extends ConsoleKernel
 
         // Schedule payroll generation
         $schedule->command('payroll:generate')
-            ->monthlyOn(1, '00:01')
+            ->monthlyOn(1, '00:30')
             ->withoutOverlapping()
             ->onOneServer();
 
         // Schedule disabling expired customers
         $schedule->command('customers:disable-expired')
             ->daily() // Changed to daily for clarity, adjust as needed
-            ->at('00:01')
+            ->at('11:30')
             ->withoutOverlapping()
             ->onOneServer();
 
         // Process due scheduled package/status changes once a day
         $schedule->command('isp:process-scheduled-changes')
-            ->dailyAt('00:01')
+            ->dailyAt('11:00')
             ->withoutOverlapping()
             ->onOneServer();
 
@@ -42,6 +42,11 @@ class Kernel extends ConsoleKernel
             ->hourly()
             ->withoutOverlapping()
             ->onOneServer();
+
+        $schedule->command('mikrotik:sync-m-users')
+            ->hourly()
+            ->withoutOverlapping()
+            ->onOneServer();    
     }
 
     /**

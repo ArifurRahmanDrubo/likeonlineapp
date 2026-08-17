@@ -8,5 +8,19 @@ use Illuminate\Database\Eloquent\Model;
 class EmailSetup extends Model
 {
     use HasFactory;
-  protected $guarded = []; 
+
+    protected $table = 'email_setup';
+
+    protected $guarded = [];
+
+    protected $fillable = [
+        'mailer',
+        'host',
+        'port',
+        'username',
+        'password',
+        'encryption',
+        'mail_from_name',
+        'mail_from_email',
+    ];
 }
