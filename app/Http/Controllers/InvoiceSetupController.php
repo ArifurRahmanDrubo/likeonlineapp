@@ -36,7 +36,6 @@ class InvoiceSetupController extends Controller
             'mobile' => 'nullable|string|max:255',
             'email' => 'nullable|email|max:255',
             'website' => 'nullable|max:255',
-            'invoice_title' => 'nullable|max:255',
             'invoice_note' => 'nullable|string|max:1000',
 
         ]);

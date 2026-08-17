@@ -15,7 +15,7 @@ return new class extends Migration
             $table->id(); // Creates an auto-incrementing primary key column 'id'
             $table->string('company_name');
             $table->string('email')->nullable();
-            $table->string('numbers')->nullable();
+            $table->string('mobile')->nullable();
             $table->text('address')->nullable();
             $table->string('website')->nullable();
             $table->string('image')->nullable();

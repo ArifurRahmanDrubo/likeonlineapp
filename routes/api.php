@@ -53,6 +53,8 @@ use App\Http\Controllers\Api\Portal\DashboardController as PortalDashboardContro
 use App\Http\Controllers\Api\Portal\BillingController as PortalBillingController;
 use App\Http\Controllers\Api\Portal\BkashPaymentController as PortalBkashPaymentController;
 use App\Http\Controllers\Api\Portal\NagadPaymentController as PortalNagadPaymentController;
+use App\Http\Controllers\Api\Portal\PaymentController as PortalPaymentController;
+use App\Http\Controllers\PaymentGatewayController;
 use App\Http\Controllers\Api\Portal\PackageController as PortalPackageController;
 use App\Http\Controllers\EquipmentUseController;
 use App\Http\Controllers\InvoiceSetupController;
@@ -133,9 +135,15 @@ Route::middleware(['auth:sanctum', 'role:client'])->prefix('portal')->group(func
     Route::get('/reports/all-payments-pdf', [PortalBillingController::class, 'allPaymentsPdf']);
     Route::post('/payments/submit', [PortalBillingController::class, 'submitPayment']);
 
-    // Online payment gateways (bKash / Nagad) — create the checkout session
+    // Online payment gateways (bKash / Nagad / SSLCommerz) — create the checkout session
     Route::post('/payments/bkash/create', [PortalBkashPaymentController::class, 'createPayment']);
     Route::post('/payments/nagad/create', [PortalNagadPaymentController::class, 'createPayment']);
+
+    // Unified dynamic gateway checkout: lists active gateways + initiates
+    // bKash / Nagad / SSLCommerz with DB credentials.
+    Route::get('/payments/gateways', [PortalPaymentController::class, 'gateways']);
+    Route::post('/payments/create', [PortalPaymentController::class, 'createPayment']);
+
     Route::get('/packages', [PortalPackageController::class, 'index']);
     Route::post('/package-change', [PortalPackageController::class, 'requestChange']);
 
@@ -459,6 +467,11 @@ Route::middleware(['auth:sanctum'])->group(function () {
     Route::get('/admin/sms/templates', [SmsSettingsController::class, 'templates']);
     Route::put('/admin/sms/templates/{id}', [SmsSettingsController::class, 'updateTemplate']);
     Route::get('/admin/sms/logs', [SmsLogController::class, 'index']);
+
+    // Payment Gateway settings (bKash / Nagad / SSLCommerz)
+    Route::get('/admin/payment-gateways', [PaymentGatewayController::class, 'index']);
+    Route::put('/admin/payment-gateways/{id}', [PaymentGatewayController::class, 'update']);
+    Route::post('/admin/payment-gateways/{id}/activate', [PaymentGatewayController::class, 'toggleActive']);
 
     //System SEtup
     Route::get('/SystemSetup', [SystemSetupController::class, 'getSystemSetup']);

@@ -24,6 +24,7 @@ class DatabaseSeeder extends Seeder
             EmailSetupSeeder::class,
             SmsGatewaySeeder::class,
             SmsTemplateSeeder::class,
+            PaymentGatewaySeeder::class,
         ]);
     }
 }

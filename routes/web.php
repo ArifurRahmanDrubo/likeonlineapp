@@ -3,6 +3,7 @@
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Api\Portal\BkashPaymentController;
 use App\Http\Controllers\Api\Portal\NagadPaymentController;
+use App\Http\Controllers\Api\Portal\PaymentController;
 
 /*
 |--------------------------------------------------------------------------
@@ -27,3 +28,11 @@ Route::get('/', function () {
 // from verifying the payment server-side with the gateway before applying it.
 Route::get('/portal/payments/bkash/callback', [BkashPaymentController::class, 'callback']);
 Route::get('/portal/payments/nagad/callback', [NagadPaymentController::class, 'callback']);
+
+// SSLCommerz callbacks (browser redirects + IPN server notification).
+// SSLCommerz POSTs form data here; settlement is verified server-side with
+// the gateway before being applied (same trust model as bKash / Nagad).
+Route::post('/portal/payments/sslcommerz/success', [PaymentController::class, 'sslcommerzSuccess']);
+Route::post('/portal/payments/sslcommerz/fail', [PaymentController::class, 'sslcommerzFail']);
+Route::post('/portal/payments/sslcommerz/cancel', [PaymentController::class, 'sslcommerzCancel']);
+Route::post('/portal/payments/sslcommerz/ipn', [PaymentController::class, 'sslcommerzIpn']);
