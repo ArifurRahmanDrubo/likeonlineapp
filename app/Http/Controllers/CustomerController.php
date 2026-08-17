@@ -24,6 +24,7 @@ use App\Models\Upazila;
 use App\Models\Upzila;
 use App\Models\Zone;
 use App\Services\ScheduledChangeService;
+use App\Services\SmsManager;
 use Carbon\Carbon;
 use Dotenv\Exception\ValidationException;
 use Exception;
@@ -938,6 +939,26 @@ class CustomerController extends Controller
                         'status' => 'unpaid',
                         'generated_at' => Carbon::now()->format('d F Y'),
                     ]);
+                }
+
+                // Greeting SMS to the new customer. Driven by the SMS template
+                // + active gateway settings; a failure here must never block
+                // the customer creation, so any error is swallowed and logged.
+                try {
+                    $companyName = optional(CompanyProfile::first())->title;
+                    app(SmsManager::class)->sendTemplateSms(
+                        to: $customer->mobile,
+                        templateKey: 'new_customer_greeting',
+                        variables: [
+                            'customer_name' => $customer->name,
+                            'username' => $customer->username,
+                            'password' => $validated['password'] ?? '',
+                            'package' => $customer->package ?? 'N/A',
+                            'company_name' => $companyName ?: 'ISP Provider',
+                        ]
+                    );
+                } catch (\Throwable $e) {
+                    Log::warning('Greeting SMS skipped for customer #' . $customer->id . ': ' . $e->getMessage());
                 }
 
                 return response()->json(['message' => 'Client created successfully']);

@@ -43,6 +43,8 @@ use App\Http\Controllers\ResignruleController;
 use App\Http\Controllers\MackpackageController;
 use App\Http\Controllers\MacResellerController;
 use App\Http\Controllers\ResellerBoxController;
+use App\Http\Controllers\SmsLogController;
+use App\Http\Controllers\SmsSettingsController;
 use App\Http\Controllers\SystemSetupController;
 use App\Http\Controllers\UserProfileController;
 use App\Http\Controllers\WebCustomerController;
@@ -437,6 +439,14 @@ Route::middleware(['auth:sanctum'])->group(function () {
     Route::post('/email-setup', [EmailSetupController::class, 'store']);
     Route::post('/InvoiceSetup', [InvoiceSetupController::class, 'store']);
     Route::get('/InvoiceSetup', [InvoiceSetupController::class, 'index']);
+
+    // SMS Gateway / Template / Log settings
+    Route::get('/admin/sms/gateways', [SmsSettingsController::class, 'gateways']);
+    Route::post('/admin/sms/gateways/{id}/activate', [SmsSettingsController::class, 'activate']);
+    Route::put('/admin/sms/gateways/{id}', [SmsSettingsController::class, 'updateGateway']);
+    Route::get('/admin/sms/templates', [SmsSettingsController::class, 'templates']);
+    Route::put('/admin/sms/templates/{id}', [SmsSettingsController::class, 'updateTemplate']);
+    Route::get('/admin/sms/logs', [SmsLogController::class, 'index']);
 
     //System SEtup
     Route::get('/SystemSetup', [SystemSetupController::class, 'getSystemSetup']);
