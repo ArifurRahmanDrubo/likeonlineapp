@@ -2,31 +2,40 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\Customer;
+use App\Services\SmsManager;
 use Illuminate\Http\Request;
-use App\Services\TwilioService;
 
 class SmsController extends Controller
 {
-    protected $twilio;
-
-    public function __construct(TwilioService $twilio)
+    public function send(Request $request, SmsManager $smsManager)
     {
-        $this->twilio = $twilio;
-    }
-
-    public function send(Request $request)
-    {
-        $request->validate([
-
+        $validated = $request->validate([
+            'customer_id' => ['required', 'integer', 'exists:customers,id'],
             'message' => 'required|string',
         ]);
 
+        $customer = Customer::findOrFail($validated['customer_id']);
+        $message = trim($validated['message']);
 
-        $message = $request->message;
+        if (blank($customer->mobile)) {
+            return response()->json([
+                'message' => 'The selected customer does not have a registered mobile number.'
+            ], 422);
+        }
 
+        $log = $smsManager->sendRawSms($customer->mobile, $message, 'manual_sms');
 
-        $response = $this->twilio->sendSms($message);
+        if (($log->status ?? null) !== 'success') {
+            return response()->json([
+                'message' => $log->response ?? 'Failed to send SMS.'
+            ], 500);
+        }
 
-        return response()->json(['status' => 'Message sent']);
+        return response()->json([
+            'message' => 'Message sent successfully.',
+            'customer_id' => $customer->id,
+            'mobile' => $customer->mobile,
+        ]);
     }
 }
