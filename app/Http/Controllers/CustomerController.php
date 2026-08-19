@@ -50,121 +50,231 @@ class CustomerController extends Controller
      * Customers keep their string-valued package/zone columns, so ID filters
      * are resolved to their names before querying.
      */
-    public function index(Request $request)
-    {
-        try {
-            // Fetch ONLY the columns rendered by the Vue Billing List page
-            // (table cells, Pay dialog, status/package change dialogs, and the
-            // Excel/PDF exports). `id` is required for the formatted_id
-            // accessor, row selection and the Pay dialog (invoice.customer_id).
-            $query = Customer::select([
-                'id', 'username', 'name', 'mobile', 'zone', 'clienttype',
-                'connectiontype', 'praddress', 'package', 'profile',
-                'expireddate', 'monthlybill', 'server', 'mikrotikStatus',
-                'billingstatus', 'server_id', 'radius_id', 'protocoltype', 'status',
-            ])->with(['invoice' => function ($q) {
-                // Only the ledger columns the page renders: Received (computed
-                // from approved payments below), BalanceDue, Advance, B.Status
-                // and the customer link used by the Pay dialog.
-                $q->select(['id', 'customer_id', 'amount', 'advance', 'status'])
-                    ->with(['payments' => function ($p) {
-                        // Only the payment fields needed to derive the "Payment
-                        // Date" column (latest approved recieved_date) and the
-                        // "Received" column (approved received_amount sum).
-                        $p->select(['id', 'customer_id', 'recieved_date', 'received_amount'])
-                            ->where('approval_status', 'approved');
-                    }]);
-            }]);
+    // public function index(Request $request)
+    // {
+    //     try {
+    //         // Fetch ONLY the columns rendered by the Vue Billing List page
+    //         // (table cells, Pay dialog, status/package change dialogs, and the
+    //         // Excel/PDF exports). `id` is required for the formatted_id
+    //         // accessor, row selection and the Pay dialog (invoice.customer_id).
+    //         $query = Customer::select([
+    //             'id', 'username', 'name', 'mobile', 'zone', 'clienttype',
+    //             'connectiontype', 'praddress', 'package', 'profile',
+    //             'expireddate', 'monthlybill', 'server', 'mikrotikStatus',
+    //             'billingstatus', 'server_id', 'radius_id', 'protocoltype', 'status',
+    //         ])->with(['invoice' => function ($q) {
+    //             // Only the ledger columns the page renders: Received (computed
+    //             // from approved payments below), BalanceDue, Advance, B.Status
+    //             // and the customer link used by the Pay dialog.
+    //             $q->select(['id', 'customer_id', 'amount', 'advance', 'status'])
+    //                 ->with(['payments' => function ($p) {
+    //                     // Only the payment fields needed to derive the "Payment
+    //                     // Date" column (latest approved recieved_date) and the
+    //                     // "Received" column (approved received_amount sum).
+    //                     $p->select(['id', 'customer_id', 'recieved_date', 'received_amount'])
+    //                         ->where('approval_status', 'approved');
+    //                 }]);
+    //         }]);
 
-            if ($request->filled('package_id')) {
-                $packageId = $request->input('package_id');
-                if (is_numeric($packageId)) {
-                    $packageName = Package::find($packageId)?->packagename;
-                    if ($packageName) {
-                        $query->where('package', $packageName);
-                    }
-                } else {
-                    $query->where('package', $packageId);
-                }
-            }
+    //         if ($request->filled('package_id')) {
+    //             $packageId = $request->input('package_id');
+    //             if (is_numeric($packageId)) {
+    //                 $packageName = Package::find($packageId)?->packagename;
+    //                 if ($packageName) {
+    //                     $query->where('package', $packageName);
+    //                 }
+    //             } else {
+    //                 $query->where('package', $packageId);
+    //             }
+    //         }
 
-            if ($request->filled('zone_id')) {
-                $zoneId = $request->input('zone_id');
-                if (is_numeric($zoneId)) {
-                    $zoneName = Zone::find($zoneId)?->zone_name;
-                    if ($zoneName) {
-                        $query->where('zone', $zoneName);
-                    }
-                } else {
-                    $query->where('zone', $zoneId);
-                }
-            }
+    //         if ($request->filled('zone_id')) {
+    //             $zoneId = $request->input('zone_id');
+    //             if (is_numeric($zoneId)) {
+    //                 $zoneName = Zone::find($zoneId)?->zone_name;
+    //                 if ($zoneName) {
+    //                     $query->where('zone', $zoneName);
+    //                 }
+    //             } else {
+    //                 $query->where('zone', $zoneId);
+    //             }
+    //         }
 
-            if ($request->filled('router_id')) {
-                $routerId = $request->input('router_id');
-                if (is_numeric($routerId)) {
-                    $query->where('server_id', $routerId);
-                } else {
-                    $query->where('server', $routerId);
-                }
-            }
+    //         if ($request->filled('router_id')) {
+    //             $routerId = $request->input('router_id');
+    //             if (is_numeric($routerId)) {
+    //                 $query->where('server_id', $routerId);
+    //             } else {
+    //                 $query->where('server', $routerId);
+    //             }
+    //         }
 
-            if ($request->filled('status')) {
-                $status = $request->input('status');
-                $query->where(function ($q) use ($status) {
-                    $q->where('status', $status)->orWhere('billingstatus', $status);
-                });
-            }
+    //         if ($request->filled('status')) {
+    //             $status = $request->input('status');
+    //             $query->where(function ($q) use ($status) {
+    //                 $q->where('status', $status)->orWhere('billingstatus', $status);
+    //             });
+    //         }
 
-            // Server-side text search across all displayable columns
-            if ($request->filled('search')) {
-                $search = $request->input('search');
-                $query->where(function ($q) use ($search) {
-                    $q->where('username', 'like', "%{$search}%")
-                      ->orWhere('name', 'like', "%{$search}%")
-                      ->orWhere('mobile', 'like', "%{$search}%")
-                      ->orWhere('zone', 'like', "%{$search}%")
-                      ->orWhere('clienttype', 'like', "%{$search}%")
-                      ->orWhere('connectiontype', 'like', "%{$search}%")
-                      ->orWhere('praddress', 'like', "%{$search}%")
-                      ->orWhere('package', 'like', "%{$search}%")
-                      ->orWhere('profile', 'like', "%{$search}%")
-                      ->orWhere('monthlybill', 'like', "%{$search}%")
-                      ->orWhere('server', 'like', "%{$search}%")
-                      ->orWhere('billingstatus', 'like', "%{$search}%");
-                });
-            }
+    //         // Server-side text search across all displayable columns
+    //         if ($request->filled('search')) {
+    //             $search = $request->input('search');
+    //             $query->where(function ($q) use ($search) {
+    //                 $q->where('username', 'like', "%{$search}%")
+    //                   ->orWhere('name', 'like', "%{$search}%")
+    //                   ->orWhere('mobile', 'like', "%{$search}%")
+    //                   ->orWhere('zone', 'like', "%{$search}%")
+    //                   ->orWhere('clienttype', 'like', "%{$search}%")
+    //                   ->orWhere('connectiontype', 'like', "%{$search}%")
+    //                   ->orWhere('praddress', 'like', "%{$search}%")
+    //                   ->orWhere('package', 'like', "%{$search}%")
+    //                   ->orWhere('profile', 'like', "%{$search}%")
+    //                   ->orWhere('monthlybill', 'like', "%{$search}%")
+    //                   ->orWhere('server', 'like', "%{$search}%")
+    //                   ->orWhere('billingstatus', 'like', "%{$search}%");
+    //             });
+    //         }
 
-            // Eager-load payments (via invoice.payments) so each customer exposes
-            // the latest approved payment date for the billing list "Payment Date"
-            // column. previous_due is a direct customers column and ships with the
-            // customer record automatically.
-            $customers = $query->get()->map(function ($customer) {
-                $payments = $customer->invoice?->payments ?? collect();
-                $latest = $payments->sortByDesc('recieved_date')->first();
-                $customer->setAttribute('last_payment_date', $latest?->recieved_date);
-                // The Billing List "Received" column reads invoice.received_amount.
-                // The invoices table has no such column, so expose the approved
-                // payment total as a computed attribute on the loaded ledger row.
-                if ($customer->invoice) {
-                    $customer->invoice->setAttribute('received_amount', (float) $payments->sum('received_amount'));
-                }
-                return $customer;
-            });
-            return response()->json([
-                'customers' => $customers
-            ], 200);
-        } catch (\Exception $e) {
-            return response()->json([
-                'message' => 'An error occurred while fetching customers.'
-            ], 500);
-        }
-    }
+    //         // Eager-load payments (via invoice.payments) so each customer exposes
+    //         // the latest approved payment date for the billing list "Payment Date"
+    //         // column. previous_due is a direct customers column and ships with the
+    //         // customer record automatically.
+    //         $customers = $query->get()->map(function ($customer) {
+    //             $payments = $customer->invoice?->payments ?? collect();
+    //             $latest = $payments->sortByDesc('recieved_date')->first();
+    //             $customer->setAttribute('last_payment_date', $latest?->recieved_date);
+    //             // The Billing List "Received" column reads invoice.received_amount.
+    //             // The invoices table has no such column, so expose the approved
+    //             // payment total as a computed attribute on the loaded ledger row.
+    //             if ($customer->invoice) {
+    //                 $customer->invoice->setAttribute('received_amount', (float) $payments->sum('received_amount'));
+    //             }
+    //             return $customer;
+    //         });
+    //         return response()->json([
+    //             'customers' => $customers
+    //         ], 200);
+    //     } catch (\Exception $e) {
+    //         return response()->json([
+    //             'message' => 'An error occurred while fetching customers.'
+    //         ], 500);
+    //     }
+    // }
     /**
      * Master init endpoint: fetches all dropdown/lookup data needed by the
      * Add/Edit Client form in a single request (replaces 11 separate API calls
      * which used to hit the 429 rate limit).
      */
+
+    public function index(Request $request)
+{
+    try {
+        // Fetch ONLY the columns rendered by the Vue Billing List page
+        $query = Customer::select([
+            'id', 'username', 'name', 'mobile', 'zone', 'clienttype',
+            'connectiontype', 'praddress', 'package', 'profile',
+            'expireddate', 'monthlybill', 'server', 'mikrotikStatus',
+            'billingstatus', 'server_id', 'radius_id', 'protocoltype', 'status',
+        ])->with(['invoice' => function ($q) {
+            $q->select(['id', 'customer_id', 'amount', 'advance', 'status'])
+                ->with(['payments' => function ($p) {
+                    $p->select(['id', 'customer_id', 'recieved_date', 'received_amount'])
+                        ->where('approval_status', 'approved');
+                }]);
+        }]);
+
+        // Package Filter
+        if ($request->filled('package_id')) {
+            $packageId = $request->input('package_id');
+            if (is_numeric($packageId)) {
+                $packageName = Package::find($packageId)?->packagename;
+                if ($packageName) {
+                    $query->where('package', $packageName);
+                }
+            } else {
+                $query->where('package', $packageId);
+            }
+        }
+
+        // Zone Filter
+        if ($request->filled('zone_id')) {
+            $zoneId = $request->input('zone_id');
+            if (is_numeric($zoneId)) {
+                $zoneName = Zone::find($zoneId)?->zone_name;
+                if ($zoneName) {
+                    $query->where('zone', $zoneName);
+                }
+            } else {
+                $query->where('zone', $zoneId);
+            }
+        }
+
+        // Router Filter
+        if ($request->filled('router_id')) {
+            $routerId = $request->input('router_id');
+            if (is_numeric($routerId)) {
+                $query->where('server_id', $routerId);
+            } else {
+                $query->where('server', $routerId);
+            }
+        }
+
+        // Status Filter
+        if ($request->filled('status')) {
+            $status = $request->input('status');
+            $query->where(function ($q) use ($status) {
+                $q->where('status', $status)->orWhere('billingstatus', $status);
+            });
+        }
+
+        // Server-side text search
+        if ($request->filled('search')) {
+            $search = $request->input('search');
+            $query->where(function ($q) use ($search) {
+                $q->where('username', 'like', "%{$search}%")
+                  ->orWhere('name', 'like', "%{$search}%")
+                  ->orWhere('mobile', 'like', "%{$search}%")
+                  ->orWhere('zone', 'like', "%{$search}%")
+                  ->orWhere('clienttype', 'like', "%{$search}%")
+                  ->orWhere('connectiontype', 'like', "%{$search}%")
+                  ->orWhere('praddress', 'like', "%{$search}%")
+                  ->orWhere('package', 'like', "%{$search}%")
+                  ->orWhere('profile', 'like', "%{$search}%")
+                  ->orWhere('monthlybill', 'like', "%{$search}%")
+                  ->orWhere('server', 'like', "%{$search}%")
+                  ->orWhere('billingstatus', 'like', "%{$search}%");
+            });
+        }
+
+        // 1. Get per_page parameter from request (Default to 10 if not passed)
+        $perPage = $request->input('per_page', 10);
+
+        // 2. Paginate the query instead of using get()
+        $paginated = $query->paginate($perPage);
+
+        // 3. Transform the current page items to attach computed attributes
+        $paginated->getCollection()->transform(function ($customer) {
+            $payments = $customer->invoice?->payments ?? collect();
+            $latest = $payments->sortByDesc('recieved_date')->first();
+            
+            $customer->setAttribute('last_payment_date', $latest?->recieved_date);
+
+            if ($customer->invoice) {
+                $customer->invoice->setAttribute('received_amount', (float) $payments->sum('received_amount'));
+            }
+            
+            return $customer;
+        });
+
+        // 4. Return the standard Laravel Paginated JSON structure directly
+        return response()->json($paginated, 200);
+
+    } catch (\Exception $e) {
+        return response()->json([
+            'message' => 'An error occurred while fetching customers.'
+        ], 500);
+    }
+}
     public function getClientFormInitData()
     {
         try {
