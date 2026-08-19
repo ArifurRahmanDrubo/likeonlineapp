@@ -6,6 +6,7 @@ use App\Models\Customer;
 use App\Models\GeneratedBill;
 use App\Models\Invoice;
 use App\Models\Payment;
+use App\Services\Sms\SmsAutomation;
 use Carbon\Carbon;
 use Exception;
 use Illuminate\Support\Facades\DB;
@@ -48,7 +49,7 @@ class PaymentSettlementService
      */
     public function settleAutomaticPayment(Customer $customer, float $amount, ?string $transactionNo, string $method): array
     {
-        return DB::transaction(function () use ($customer, $amount, $transactionNo, $method) {
+        $result = DB::transaction(function () use ($customer, $amount, $transactionNo, $method) {
             $customerId = $customer->id;
             $paidAmount = (float) $amount;
             $remaining = $paidAmount;
@@ -185,6 +186,17 @@ class PaymentSettlementService
                 'remaining_due' => $remainingDue,
             ];
         });
+
+        // Payment-confirmation SMS — dispatched AFTER the transaction commits
+        // and only when the "Send SMS on Payment" permission is enabled.
+        // Fully non-blocking: queueing failures are caught inside
+        // SmsAutomation, so an SMS timeout can never fail the settlement or
+        // the gateway response the customer receives.
+        if (SmsAutomation::permissionEnabled('send_sms_on_payment')) {
+            SmsAutomation::queuePaymentConfirmation($customer, $amount, $transactionNo);
+        }
+
+        return $result;
     }
 
     /**

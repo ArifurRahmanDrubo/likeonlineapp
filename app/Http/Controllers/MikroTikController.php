@@ -197,6 +197,19 @@ public function getUsers(Request $request)
         if (!empty($userType)) {
             $query->where('user_status', $userType);
         }
+
+        // Server-side text search across all displayable columns
+        if ($request->filled('search')) {
+            $search = $request->input('search');
+            $query->where(function ($q) use ($search) {
+                $q->where('name', 'like', "%{$search}%")
+                  ->orWhere('profile', 'like', "%{$search}%")
+                  ->orWhere('caller_id', 'like', "%{$search}%")
+                  ->orWhere('server_name', 'like', "%{$search}%")
+                  ->orWhere('user_status', 'like', "%{$search}%");
+            });
+        }
+
         // Fetch ONLY the columns rendered by the Vue Import From Mikrotik page:
         // Name, Password, Service, Profile, Caller Id, Server Name, LogOut Time,
         // User Status, the status InputSwitch and the action payload fields.

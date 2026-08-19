@@ -79,6 +79,49 @@ class DashboardController extends Controller
                 }
             }
 
+            // Real-time countdown target — the expiry is a FIXED day-of-month
+            // (customers.expireddate holds "05" or a full date). The target is
+            // recomputed from customers.expireddate on EVERY request, so when
+            // the admin manually increases/updates the expiry day the countdown
+            // automatically follows the new value:
+            //   today <= stored day  -> this month, [stored day] 23:59:59
+            //   today >  stored day  -> next month, [stored day] 23:59:59
+            // Short months are capped at their last day.
+            //
+            // Grace period: when the current cycle's deadline has passed
+            // (overdue) but the admin has explicitly left the account Active,
+            // the customer is granted until NEXT month's deadline. The API
+            // reports is_grace_period=true and keeps expired=false, so the
+            // portal never shows a hard "Expired" state while the account is
+            // still enabled.
+            $expiryTarget = null;
+            $expired = false;
+            $isGracePeriod = false;
+            $expiryDay = $this->expiryDayOfMonth($customer->expireddate);
+            if ($expiryDay !== null) {
+                $now = Carbon::now();
+                $overdue = $now->day > $expiryDay;
+
+                if ($overdue) {
+                    $next = $now->copy()->addMonthNoOverflow();
+                    $target = Carbon::create($next->year, $next->month, min($expiryDay, $next->daysInMonth), 23, 59, 59);
+
+                    // Admin re-enabled / never disabled an overdue account →
+                    // soft "grace" state only if there are actual unpaid dues.
+                    // If the bill is fully paid (totalDue == 0) no grace period
+                    // is needed — the customer is simply active.
+                    if (strtolower((string) $customer->status) === 'active') {
+                        $isGracePeriod = $totalDue > 0;
+                    } else {
+                        $expired = true;
+                    }
+                } else {
+                    $target = Carbon::create($now->year, $now->month, min($expiryDay, $now->daysInMonth), 23, 59, 59);
+                }
+
+                $expiryTarget = $target->toISOString();
+            }
+
             // MAC address: prefer the static binding stored in DB (caller_id), and
             // fall back to a live /ppp/active lookup on the assigned MikroTik
             // router so the customer portal always shows the real caller-id.
@@ -114,6 +157,9 @@ class DashboardController extends Controller
                     'expireddate' => $customer->expireddate,
                     'formatted_expireddate' => $expiryDate ? $expiryDate->format('d M Y') : null,
                     'days_remaining' => $daysRemaining,
+                    'expiry_target' => $expiryTarget,
+                    'expired' => $expired,
+                    'is_grace_period' => $isGracePeriod,
                     'previous_due' => (float) ($customer->previous_due ?? 0),
                     'joiningdate' => $customer->joiningdate,
                     'connection' => [
@@ -141,6 +187,34 @@ class DashboardController extends Controller
         } catch (\Exception $e) {
             Log::error("Portal dashboard failed: {$e->getMessage()}");
             return response()->json(['message' => 'Failed to load dashboard.'], 500);
+        }
+    }
+
+    /**
+     * Extract the fixed day-of-month from customers.expireddate.
+     *
+     * Mirrors DisableExpiredCustomers::expiryDayOfMonth: the column is a
+     * string; the client form stores a plain day ("05") while legacy records
+     * may hold a full date (day read from the parsed date).
+     *
+     * @return int|null day of month (1-31), or null when unknown.
+     */
+    private function expiryDayOfMonth($expireddate): ?int
+    {
+        $value = trim((string) $expireddate);
+        if ($value === '') {
+            return null;
+        }
+
+        if (ctype_digit($value)) {
+            $day = (int) $value;
+            return ($day >= 1 && $day <= 31) ? $day : null;
+        }
+
+        try {
+            return (int) Carbon::parse($value)->day;
+        } catch (\Throwable $e) {
+            return null;
         }
     }
 

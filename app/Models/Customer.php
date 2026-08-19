@@ -15,6 +15,16 @@ class Customer extends Model
         'left_date' => 'datetime',
     ];
 
+    /**
+     * Store the monthly bill as a whole number (nearest taka) on every write
+     * — create, edit, package change — so generated bills never carry
+     * decimals or floating-point drift.
+     */
+    public function setMonthlybillAttribute($value)
+    {
+        $this->attributes['monthlybill'] = $value === null || $value === '' ? null : round((float) $value);
+    }
+
     // public function getFormattedIdAttribute()
     // {
     //     return str_pad($this->attributes['id'], 4, '0', STR_PAD_LEFT);

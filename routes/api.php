@@ -39,6 +39,8 @@ use App\Http\Controllers\ClientTypeController;
 use App\Http\Controllers\DepartmentController;
 use App\Http\Controllers\EmailSetupController;
 use App\Http\Controllers\NewRequestController;
+use App\Http\Controllers\PageInitialController;
+use App\Http\Controllers\ModalLookupsController;
 use App\Http\Controllers\ResignruleController;
 use App\Http\Controllers\MackpackageController;
 use App\Http\Controllers\MacResellerController;
@@ -48,6 +50,7 @@ use App\Http\Controllers\SmsSettingsController;
 use App\Http\Controllers\SystemSetupController;
 use App\Http\Controllers\UserProfileController;
 use App\Http\Controllers\WebCustomerController;
+use App\Http\Controllers\WebPackageController;
 use App\Http\Controllers\Api\Portal\AuthController as PortalAuthController;
 use App\Http\Controllers\Api\Portal\DashboardController as PortalDashboardController;
 use App\Http\Controllers\Api\Portal\BillingController as PortalBillingController;
@@ -72,6 +75,7 @@ use App\Http\Controllers\ResellerPositionController;
 use App\Http\Controllers\RoleAndPermissionController;
 use App\Http\Controllers\ResellerDepartmentController;
 use App\Http\Controllers\CustomerBillingStatusController;
+use App\Http\Controllers\Api\DueReminderSmsController;
 
 /*
 |--------------------------------------------------------------------------
@@ -92,6 +96,9 @@ Route::get('/public/company-profile', [CompanyProfileController::class, 'index']
 
 Route::get('/get-webpackage', [WebCustomerController::class, 'webpackage']);
 Route::post('/customer-new-line', [WebCustomerController::class, 'storeCustomerNewLine']);
+
+// Public endpoint — active web packages for the public website (likeonlinebd).
+Route::get('/public/web-packages', [WebPackageController::class, 'getPublicPackages']);
 
 
 
@@ -177,7 +184,7 @@ Route::middleware(['auth:sanctum'])->group(function () {
     Route::get('get-connection-type', [ConnectionTypeController::class, 'index'])->middleware('permission:connection_type,read');
     Route::post('create-connection-type', [ConnectionTypeController::class, 'store'])->middleware('permission:connection_type,write');
     Route::post('update-connection-type', [ConnectionTypeController::class, 'update'])->middleware('permission:connection_type,write');
-    Route::post('delete-connection-type', [ConnectionTypeController::class, 'destroy'])->middleware('permission:connapi/portal/bandwidth/startection_type,full');
+    Route::post('delete-connection-type', [ConnectionTypeController::class, 'destroy'])->middleware('permission:connection_type,full');
     Route::post('connection-type/delete-multiple', [ConnectionTypeController::class, 'deleteMultiple'])->middleware('permission:connection_type,full');
     //clienttype
     Route::get('get-client-type', [ClientTypeController::class, 'index'])->middleware('permission:client_type,read');
@@ -578,6 +585,13 @@ Route::middleware(['auth:sanctum'])->group(function () {
     Route::post('/delete-ConnectionRequest', [WebCustomerController::class, 'delete'])->middleware('permission:new_connection_request,full');
     Route::post('/ConnectionRequest/delete-multiple', [WebCustomerController::class, 'deleteMultipleNewline'])->middleware('permission:new_connection_request,full');
 
+    //website web packages (public website packages)
+    Route::get('/get-web-packages', [WebPackageController::class, 'index'])->middleware('permission:web_package,read');
+    Route::get('/get-web-package/{id}', [WebPackageController::class, 'show'])->middleware('permission:web_package,read');
+    Route::post('/create-web-package', [WebPackageController::class, 'store'])->middleware('permission:web_package,write');
+    Route::post('/update-web-package', [WebPackageController::class, 'update'])->middleware('permission:web_package,write');
+    Route::post('/delete-web-package', [WebPackageController::class, 'destroy'])->middleware('permission:web_package,full');
+
 
 
     //inventory Category
@@ -630,4 +644,14 @@ Route::middleware(['auth:sanctum'])->group(function () {
     Route::post('/delete-bandwidthbill', [BandwidthbillController::class, 'destroy'])->middleware('permission:bandwidthbill,full');
     Route::post('/bandwidthbill/delete-multiple', [BandwidthbillController::class, 'deleteMultiple'])->middleware('permission:bandwidthbill,full');
     Route::get('getAccountsData', [AccountsController::class, 'accountsData']);
+
+    // --- Due Reminder SMS (manual trigger, permission-gated) ---
+    Route::post('/send-due-reminder', [DueReminderSmsController::class, 'sendReminder'])
+        ->middleware('permission:send_sms_reminder,read');
+    Route::post('/send-bulk-due-reminders', [DueReminderSmsController::class, 'sendBulkReminders'])
+        ->middleware('permission:send_sms_reminder,full');
+
+    // --- Optimized consolidated endpoints (performance) ---
+    Route::get('/page-initial-users', [PageInitialController::class, 'getInitialUsersAndEmployees']);
+    Route::get('/modal-lookups', [ModalLookupsController::class, 'getModalLookups']);
 });

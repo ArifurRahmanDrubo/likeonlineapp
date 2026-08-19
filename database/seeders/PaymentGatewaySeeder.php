@@ -23,7 +23,6 @@ class PaymentGatewaySeeder extends Seeder
             [
                 'name'        => 'bkash',
                 'title'       => 'bKash',
-                'logo'        => 'https://upload.wikimedia.org/wikipedia/commons/6/67/BKash_logo.svg',
                 'is_active'   => (bool) env('BKASH_SANDBOX', true) || env('BKASH_APP_KEY', '') !== '',
                 'mode'        => env('BKASH_SANDBOX', true) ? 'sandbox' : 'live',
                 'credentials' => [
@@ -36,7 +35,6 @@ class PaymentGatewaySeeder extends Seeder
             [
                 'name'        => 'nagad',
                 'title'       => 'Nagad',
-                'logo'        => 'https://upload.wikimedia.org/wikipedia/commons/thumb/7/78/Nagad_logo.svg/320px-Nagad_logo.svg.png',
                 'is_active'   => (bool) env('NAGAD_SANDBOX', true) || env('NAGAD_MERCHANT_ID', '') !== '',
                 'mode'        => env('NAGAD_SANDBOX', true) ? 'sandbox' : 'live',
                 'credentials' => [
@@ -48,7 +46,6 @@ class PaymentGatewaySeeder extends Seeder
             [
                 'name'        => 'sslcommerz',
                 'title'       => 'SSLCommerz',
-                'logo'        => 'https://www.sslcommerz.com/wp-content/uploads/2020/03/sslcommerz.png',
                 'is_active'   => (bool) env('SSLCOMMERZ_SANDBOX', false) || env('SSLCOMMERZ_STORE_ID', '') !== '',
                 'mode'        => env('SSLCOMMERZ_SANDBOX', false) ? 'sandbox' : 'live',
                 'credentials' => [

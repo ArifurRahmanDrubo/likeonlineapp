@@ -4,7 +4,7 @@ use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Api\Portal\BkashPaymentController;
 use App\Http\Controllers\Api\Portal\NagadPaymentController;
 use App\Http\Controllers\Api\Portal\PaymentController;
-
+use Illuminate\Support\Facades\Artisan;
 /*
 |--------------------------------------------------------------------------
 | Web Routes
@@ -16,6 +16,13 @@ use App\Http\Controllers\Api\Portal\PaymentController;
 |
 */
 
+
+
+// সিকিউরিটির জন্য একটি সিক্রেট কী ব্যবহার করুন
+Route::get('/run-scheduler-secret-key-234243224569', function () {
+    Artisan::call('schedule:run');
+    return 'Scheduler executed successfully!';
+});
 Route::get('/', function () {
     return view('welcome');
 });

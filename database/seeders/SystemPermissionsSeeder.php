@@ -20,6 +20,8 @@ class SystemPermissionsSeeder extends Seeder
                 'payroll_with_absence' => false,
                 'payment_status_wise_client_disabled' => false,
                 'company_name_invoice' => false,
+                'send_sms_on_payment' => false,
+                'send_sms_reminder' => false,
                 'block_mikrotik_profile' => null,
                 'save_comment_in_mikrotik' => false,
                 'created_at' => now(),

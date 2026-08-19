@@ -14,6 +14,10 @@ class VerifyCsrfToken extends Middleware
     protected $except = [
         'sanctum/csrf-cookie',
         'api/*', '/sslcommerz/*',
+        'portal/payments/sslcommerz/success',
+        'portal/payments/sslcommerz/fail',
+        'portal/payments/sslcommerz/cancel',
+        'portal/payments/sslcommerz/ipn',
     ];
 
 }

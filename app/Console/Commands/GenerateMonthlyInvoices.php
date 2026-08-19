@@ -57,7 +57,8 @@ class GenerateMonthlyInvoices extends Command
 
                     // 4. Safe Database Operation with Transaction
                     DB::transaction(function () use ($customer, $currentMonth) {
-                        $monthlyBill = (float) $customer->monthlybill;
+                        // Whole-number bill — round legacy decimal values too.
+                        $monthlyBill = round((float) $customer->monthlybill);
                         $existingInvoice = Invoice::where('customer_id', $customer->id)->first();
 
                         if ($existingInvoice) {

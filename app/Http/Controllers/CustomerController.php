@@ -116,6 +116,25 @@ class CustomerController extends Controller
                 });
             }
 
+            // Server-side text search across all displayable columns
+            if ($request->filled('search')) {
+                $search = $request->input('search');
+                $query->where(function ($q) use ($search) {
+                    $q->where('username', 'like', "%{$search}%")
+                      ->orWhere('name', 'like', "%{$search}%")
+                      ->orWhere('mobile', 'like', "%{$search}%")
+                      ->orWhere('zone', 'like', "%{$search}%")
+                      ->orWhere('clienttype', 'like', "%{$search}%")
+                      ->orWhere('connectiontype', 'like', "%{$search}%")
+                      ->orWhere('praddress', 'like', "%{$search}%")
+                      ->orWhere('package', 'like', "%{$search}%")
+                      ->orWhere('profile', 'like', "%{$search}%")
+                      ->orWhere('monthlybill', 'like', "%{$search}%")
+                      ->orWhere('server', 'like', "%{$search}%")
+                      ->orWhere('billingstatus', 'like', "%{$search}%");
+                });
+            }
+
             // Eager-load payments (via invoice.payments) so each customer exposes
             // the latest approved payment date for the billing list "Payment Date"
             // column. previous_due is a direct customers column and ships with the
@@ -254,7 +273,8 @@ class CustomerController extends Controller
         if ($carbonDate->format('Y-m') === $targetMonth && $carbonDate->day > 1) {
             $totalDaysInMonth = $carbonDate->daysInMonth;
             $remainingDays = ($totalDaysInMonth - $carbonDate->day) + 1;
-            return round(($monthlyBill / $totalDaysInMonth) * $remainingDays, 2);
+            // Round the pro-rata amount to a whole number (nearest taka).
+            return round(($monthlyBill / $totalDaysInMonth) * $remainingDays);
         }
 
         return $monthlyBill;
@@ -646,6 +666,7 @@ class CustomerController extends Controller
                 'coreno' => 'nullable|string|max:255',
                 'corecolor' => 'nullable|string|max:255',
                 'con_charge' => 'nullable|string|max:255',
+                'installation_fee' => 'nullable|numeric',
                 'package' => 'required|string|max:255',
                 'profile' => 'required|string|max:255',
                 'username' => 'required|string|max:255',
@@ -879,17 +900,17 @@ class CustomerController extends Controller
                     }
                 }
 
-                    $smsBody = "Dear ,\n"
-                        . "Congratulations! Your '' Registration has been Successfully Completed.\n"
-                        . "We have received BDT  for your  Participant"
-                        . ".\n"
-                        . "Your Reg. ID is . Please remember your Reg. ID for further queries.\n\n"
-                        . "Thanks,\n"
-                        . "Chapai Utsab Reg. Sub-comittee 2026\n"
-                        . "Contact:";
-                    if (isValidBangladeshiNumber($mobile)) {
-                        SendSmsJob::dispatch($mobile, $smsBody, 'greetings');
-                    }
+                    // $smsBody = "Dear ,\n"
+                    //     . "Congratulations! Your '' Registration has been Successfully Completed.\n"
+                    //     . "We have received BDT  for your  Participant"
+                    //     . ".\n"
+                    //     . "Your Reg. ID is . Please remember your Reg. ID for further queries.\n\n"
+                    //     . "Thanks,\n"
+                    //     . "Chapai Utsab Reg. Sub-comittee 2026\n"
+                    //     . "Contact:";
+                    // if (isValidBangladeshiNumber($mobile)) {
+                    //     SendSmsJob::dispatch($mobile, $smsBody, 'greetings');
+                    // }
 
                 return response()->json(['message' => 'Client updated successfully']);
             } else {

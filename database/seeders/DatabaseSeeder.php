@@ -3,6 +3,7 @@
 namespace Database\Seeders;
 
 // use Illuminate\Database\Console\Seeds\WithoutModelEvents;
+use Database\Seeders\SystemPermissionsSeeder;
 use Illuminate\Database\Seeder;
 
 class DatabaseSeeder extends Seeder
@@ -25,6 +26,8 @@ class DatabaseSeeder extends Seeder
             SmsGatewaySeeder::class,
             SmsTemplateSeeder::class,
             PaymentGatewaySeeder::class,
+            WebPackageSeeder::class,
+            SystemPermissionsSeeder::class
         ]);
     }
 }

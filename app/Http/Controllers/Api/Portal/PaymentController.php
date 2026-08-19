@@ -40,12 +40,11 @@ class PaymentController extends Controller
     public function gateways(Request $request)
     {
         $gateways = PaymentGateway::orderBy('id')
-            ->get(['name', 'title', 'logo', 'is_active', 'mode'])
+            ->get(['name', 'title', 'is_active', 'mode'])
             ->map(function ($gateway) {
                 return [
                     'name' => $gateway->name,
                     'title' => $gateway->title,
-                    'logo' => $gateway->logo,
                     'is_active' => (bool) $gateway->is_active,
                     'mode' => $gateway->mode,
                 ];
@@ -307,7 +306,7 @@ class PaymentController extends Controller
 
             // Recover the username: value_a is echoed verbatim by SSLCommerz;
             // fall back to parsing the TRX-{username}-{timestamp} tran_id.
-            $username = $request->input('value_a') ?: $this->gatewayService->extractUsername($tranId);
+            $username =  $this->gatewayService->extractUsername($tranId);
             $customer = $username ? Customer::where('username', $username)->first() : null;
 
             if (!$customer) {

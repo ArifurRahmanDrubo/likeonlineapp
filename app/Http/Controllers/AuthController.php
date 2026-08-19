@@ -239,26 +239,18 @@ class AuthController extends Controller
 
     public function logout(Request $request)
     {
-        // Get the authenticated user
-        // $user = $request->user();
-
-        // // Delete the current access token
-        // $user->currentAccessToken()->delete();
-
-        // // Dispatch the Logout event
-        // event(new Logout(auth()->guard('web'), $user));
-
-        // // Return a successful response
-        // return response()->json(['message' => 'Logout successful!']);
         $user = $request->user();
 
-        // Check if the current token is a Personal Access Token
-        if ($request->user()->currentAccessToken() instanceof PersonalAccessToken) {
-            return response()->json(['message' => 'This is a Personal Access Token']);
+        if ($user) {
+            // Revoke the current access token so the session is invalid.
+            $user->currentAccessToken()->delete();
+
+            // Dispatch the Logout event → LogUserLogout listener marks the
+            // login-history record as 'logged_out' with duration.
+            event(new Logout(auth()->guard('web'), $user));
         }
 
-        // Otherwise, it's a Transient Token
-        return response()->json(['message' => 'This is a Transient Token']);
+        return response()->json(['message' => 'Logout successful!']);
     }
 
     public function user(Request $request)

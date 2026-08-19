@@ -30,7 +30,7 @@ class ScheduledChangeService
             return null;
         }
 
-        $server = $customer->server ?? MikrotikServer::find($customer->server_id);
+        $server = MikrotikServer::find($customer->server_id);
         if (!$server) {
             return null;
         }

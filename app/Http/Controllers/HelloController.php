@@ -28,25 +28,13 @@ class HelloController extends Controller
 {
 public function clientList(Request $request)
 {
-    // Server-side pagination only — search is NOT handled here.
-    // The Vue ClientList page performs reactive client-side search across
-    // all columns, so no `search` parameter is ever sent to this endpoint.
+    // Server-side pagination + server-side search.
     // Live MikroTik session data is fetched on-demand per customer
     // via GET /api/customers/{id}/live-mac (never during page load).
     try {
         $perPage = max(1, $request->integer('per_page', 25));
 
-        // Standard Laravel pagination JSON: data, current_page, last_page, total, per_page.
-        // Left clients are managed on the dedicated Left Client page, so they
-        // are excluded here. NULL-safe: legacy customers without a status are
-        // still shown.
-        // Fetch ONLY the columns rendered by the Vue Client List page: table
-        // cells (C.Code, ID/IP, Password, Cus.Name, Mobile, Zone, Cus_Type,
-        // Conn_Type, Package, Speed, M.Bill, Server, Live MAC, M.Status,
-        // B.Status), the row actions (Profile/Edit/Live Monitor/Make Left),
-        // plus the PDF/Excel export fields. `id` is required for the
-        // formatted_id accessor and row selection.
-        return Customer::select([
+        $query = Customer::select([
                 'id', 'username', 'password', 'name', 'mobile', 'zone',
                 'clienttype', 'connectiontype', 'package', 'profile',
                 'monthlybill', 'server', 'caller_id', 'mikrotikStatus',
@@ -54,8 +42,28 @@ public function clientList(Request $request)
             ])
             ->where(function ($q) {
                 $q->whereNull('status')->orWhere('status', '!=', 'left');
-            })
-            ->paginate($perPage);
+            });
+
+        // Server-side text search across all displayable columns
+        if ($request->filled('search')) {
+            $search = $request->input('search');
+            $query->where(function ($q) use ($search) {
+                $q->where('username', 'like', "%{$search}%")
+                  ->orWhere('name', 'like', "%{$search}%")
+                  ->orWhere('mobile', 'like', "%{$search}%")
+                  ->orWhere('zone', 'like', "%{$search}%")
+                  ->orWhere('clienttype', 'like', "%{$search}%")
+                  ->orWhere('connectiontype', 'like', "%{$search}%")
+                  ->orWhere('package', 'like', "%{$search}%")
+                  ->orWhere('profile', 'like', "%{$search}%")
+                  ->orWhere('monthlybill', 'like', "%{$search}%")
+                  ->orWhere('server', 'like', "%{$search}%")
+                  ->orWhere('billingstatus', 'like', "%{$search}%")
+                  ->orWhere('praddress', 'like', "%{$search}%");
+            });
+        }
+
+        return $query->paginate($perPage);
     } catch (\Exception $e) {
         Log::error("Failed to fetch client list: {$e->getMessage()}");
 

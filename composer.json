@@ -16,10 +16,12 @@
         "laravel/framework": "^10.0",
         "laravel/sanctum": "^3.3",
         "laravel/tinker": "^2.8",
+        "masbug/flysystem-google-drive-ext": "^2.5",
         "mpdf/mpdf": "^8.2",
         "pear2/net_routeros": "^1.0@beta",
         "predis/predis": "^2.2",
         "pusher/pusher-php-server": "^7.3",
+        "spatie/laravel-backup": "^9.3",
         "stevebauman/location": "^6.6.1",
         "torann/geoip": "^3.0"
     },

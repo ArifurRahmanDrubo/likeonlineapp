@@ -39,6 +39,7 @@ return new class extends Migration
             $table->string('registrationimage_public_id')->nullable();
             $table->string('fathername')->nullable();;
             $table->string('mothername')->nullable();;
+            $table->decimal('installation_fee', 10, 2)->default(0);
             $table->decimal('latitude', 10, 7)->nullable();
             $table->decimal('longitude', 10, 7)->nullable();
             $table->string('facebook')->nullable();

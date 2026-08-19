@@ -711,8 +711,12 @@ class RoleAndPermissionController extends Controller
 
     public function loginHistory(Request $request)
     {
-        // Optionally, add authentication and authorization checks here
-        $userLoginHistories = UserLoginHistory::where('user_id', $request->user()->id)
+        // Pass user_id=query param to view a specific user's history;
+        // defaults to the authenticated user's own history.
+        $userId = $request->input('user_id') ?? $request->user()->id;
+
+        $userLoginHistories = UserLoginHistory::where('user_id', $userId)
+            ->select('id', 'user_id', 'ip_address', 'country', 'city', 'status', 'logged_in_at', 'logged_out_at', 'duration')
             ->orderBy('logged_in_at', 'desc')
             ->get();
 

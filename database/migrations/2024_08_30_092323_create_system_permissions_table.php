@@ -19,6 +19,9 @@ return new class extends Migration {
             $table->boolean('company_name_invoice')->default(false);
             $table->string('block_mikrotik_profile')->nullable(); // Stores custom blocked profile name or string
             $table->boolean('save_comment_in_mikrotik')->default(false);
+            $table->boolean('send_sms_on_payment')->default(false);
+            $table->boolean('send_sms_reminder')->default(false);
+            
             $table->timestamps();
         });
     }

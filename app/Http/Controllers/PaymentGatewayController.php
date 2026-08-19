@@ -28,7 +28,7 @@ class PaymentGatewayController extends Controller
     /**
      * PUT /api/admin/payment-gateways/{id}
      *
-     * Instant save per gateway card: title, logo, mode, is_active and the
+     * Instant save per gateway card: title, mode, is_active and the
      * gateway-specific credential keys (validated against the whitelist).
      */
     public function update(Request $request, int $id)
