@@ -70,7 +70,7 @@ class PayrollService
                             'basic_salary'    => round($employee->basic_salary ?? 0),
                             'advance_balance' => 0,
                             'due_balance'     => 0,
-                            'status'          => 'active',
+                            'status'          => 'unpaid',
                         ]
                     );
 

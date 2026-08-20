@@ -71,6 +71,20 @@ class WebPackageController extends Controller
         return response()->json($packages);
     }
 
+    /**
+     * Public: active "home" internet packages for the public website.
+     */
+    public function getHomePackages()
+    {
+        $packages = WebPackage::where('status', true)
+            ->where('package_type', 'home')
+            ->orderBy('sort_order')
+            ->orderBy('id')
+            ->get();
+
+        return response()->json($packages);
+    }
+
     protected function validatePackage(Request $request)
     {
         return $request->validate([

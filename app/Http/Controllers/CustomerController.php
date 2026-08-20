@@ -275,6 +275,22 @@ class CustomerController extends Controller
         ], 500);
     }
 }
+
+public function getAllClients()
+{
+    $clients = Customer::select('id','username')->get();
+    return response()->json($clients);
+}
+public function getClientPaymentInfo($id)
+{
+    $client = Customer::select('id', 'username', 'mobile', 'profile', 'monthlybill')
+        ->with(['invoice' => function ($query) {
+            $query->select('id', 'customer_id', 'amount'); // শুধুমাত্র প্রয়োজনীয় কলাম
+        }])
+        ->findOrFail($id);
+
+    return response()->json($client);
+}
     public function getClientFormInitData()
     {
         try {

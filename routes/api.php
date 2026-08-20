@@ -100,6 +100,9 @@ Route::post('/customer-new-line', [WebCustomerController::class, 'storeCustomerN
 // Public endpoint — active web packages for the public website (likeonlinebd).
 Route::get('/public/web-packages', [WebPackageController::class, 'getPublicPackages']);
 
+// Public endpoint — active "home" internet packages for the public website.
+Route::get('/public/home-packages', [WebPackageController::class, 'getHomePackages']);
+
 
 
 Route::post('/register', [AuthController::class, 'register']);
@@ -334,6 +337,10 @@ Route::middleware(['auth:sanctum'])->group(function () {
     //Master init: all AddNewClient dropdown/lookup data in one request
     Route::get('client-form-init', [CustomerController::class, 'getClientFormInitData']);
     Route::get('get-client/{id}', [CustomerController::class, 'getClient']);
+    Route::get('get-all-clients', [CustomerController::class, 'getAllClients']);
+    Route::get('get-client-payment-info/{id}', [CustomerController::class, 'getClientPaymentInfo']);
+
+    
     Route::post('update-clientbillingstatus', [CustomerController::class, 'updateclientbillingstatus']);
     Route::post('update-packageStatus', [CustomerController::class, 'updatepPackageStatus']);
     Route::post('customers/{id}/change-package', [CustomerController::class, 'changePackage']);
